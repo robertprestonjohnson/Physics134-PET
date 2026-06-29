@@ -33,6 +33,7 @@ int PET::dacLoad(int DAC, bool writeEEPROM, int volt) {
         vsteps = roundf(volt / step);
     } else {
         printf("dacLoad: the requested voltage setting %d is out of range. The old setting remains.\n", volt);
+        UARTmsg("ERROR: the requested DAC setting " + to_string(volt) + " is out of range.\n");
         return EXIT_FAILURE;
     }
 
@@ -88,7 +89,7 @@ int PET::dacLoad(int DAC, bool writeEEPROM, int volt) {
              buf[0], buf[1], buf[2], buf[3], buf[4]);
 
     // Read analog input pin (AIN)
-	printf("dacLoad: pause %d for HV to stabilize, and then measure it. . .\n",tpause);
+	printf("dacLoad: pause %d seconds for the voltage to stabilize, and then measure it. . .\n",tpause);
 	sleep(tpause);
     float vain3;
     uint32_t raw3;
@@ -99,15 +100,17 @@ int PET::dacLoad(int DAC, bool writeEEPROM, int volt) {
         case 4: rp_ApinGetValue(RP_AIN3, &vain3, &raw3); break;
     }
     printf("dacLoad: read Voltage: %.3f V, Raw: %u\n", vain3, raw3);
-    if (DAC < 3) return EXIT_SUCCESS;
-
+    if (DAC < 3) {
+		UARTmsg("STATUS: measured voltage for DAC " + to_string(DAC) + " is " + to_string(vain3) + " V\n");
+		return EXIT_SUCCESS;
+    }
 	float r1=10000000;          // first resistance in the voltage divider, in ohms
 	float r2=10200;             // second resistance in the voltage divider, in ohms
 	float scale=((r1+r2)/r2);
 	float r_out=(scale*vain3);
 
     printf("dacLoad: high Voltage output is %.4f volts\n",r_out);
-    UARTmsg("STATUS: the voltage reading for DAC " + to_string(DAC) + " is " + to_string(r_out) + " V\n");
+    UARTmsg("STATUS: measured HV for DAC " + to_string(DAC) + " is " + to_string(r_out) + " V\n");
 
     return EXIT_SUCCESS;
 }

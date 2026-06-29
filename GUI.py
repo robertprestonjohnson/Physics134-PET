@@ -1,4 +1,5 @@
-#This Program creates a gui that will send commands over serial connection to the RedPitaya
+# This Program creates a Graphical User Interface that sends commands over a serial connection to the RedPitaya
+# Students should interact with the program rather than logging into the Red Pitaya over the ethernet.
 import threading
 import time
 import tkinter as tk
@@ -16,14 +17,16 @@ from matplotlib.figure import Figure
 import os
 import re
 
+# UART parameters for the communication between PC and Red Pitaya. These must match what is set in PET_RP_Slave.cpp
 SERIAL_CFG = {
-    "baudrate": 115200,
-    "timeout": 20,
-    "handshake_send": b"R U THERE?",
-    "handshake_expect": b"YES I AM\n",
-    "done_token": b"DONE\n",
+    "baudrate": 115200,                   # bits per second for the UART connection. This absolutely must match the value in PET_RP_Slave.cpp
+    "timeout": 20,                        # command timeout in seconds. This should be plenty of time for the Red Pitaya to respond
+    "handshake_send": b"R U THERE?",      # message sent prior to sending a new command, to see if PET_RP_Slave is executing.
+    "handshake_expect": b"YES I AM\n",    # the expected reply from PET_RP_Slave
+    "done_token": b"DONE\n",              # message sent by PET_RP_Slave when it has finished executing a command
 }
 
+# Default values for the parameters that can be set by the GUI. A few no longer appear in the GUI, for safety (e.g. "write").
 DEFAULTS = {
     "angle": "0",
     "nsteps": "1",
@@ -54,6 +57,7 @@ DEFAULTS = {
     "distance": "5",
 }
 
+# Define parameters that appear in the list on the left in the GUI and take numerical or string values
 NUM_PARAMS = [
     {"key": "nsteps",       "label": "Steps",        "prefix": "-N", "dtype": "int"},
     {"key": "x0",           "label": "X0",           "prefix": "-0", "dtype": "float"},
@@ -79,6 +83,11 @@ NUM_PARAMS = [
     {"key": "datafile",     "label": "Datafile",     "prefix": "-f", "dtype": "str"},
 ]
 
+# These two paramters are treated separately in the code from those above, although it isn't clear why. . .
+CTRL_ANGLE = {"key": "angle", "label": "Angle", "prefix": "-G", "dtype": "float"}
+CTRL_FILE  = {"key": "filename", "label": "File", "prefix": "-F", "dtype": "str"}
+
+# Define parameters that appear in the list on the left in the GUI and have drop-down menus
 DROPDOWNS = [
     {"key": "trgtype",   "label": "Trgtype",   "prefix": "-t", "options": ("external", "internal", "pedestal")},
     {"key": "trigchan",  "label": "TrigChan",  "prefix": "-c", "options": ("chA", "chB")},
@@ -87,9 +96,7 @@ DROPDOWNS = [
     {"key": "direction", "label": "Direction", "prefix": "-d", "options": ("left", "right")},
 ]
 
-CTRL_ANGLE = {"key": "angle", "label": "Angle", "prefix": "-G", "dtype": "float"}
-CTRL_FILE  = {"key": "filename", "label": "File", "prefix": "-F", "dtype": "str"}
-
+# Define the command parameters that each action button will send to the Red Pitaya main program PET_RP_Slave.cpp 
 BUTTON_PARAM_SETS = {
     "Scan": [
         "angle", "filename",
@@ -120,6 +127,7 @@ BUTTON_PARAM_SETS = {
     "Projection": [],
 }
 
+# Define for each action button the name of the corresponding command to be interpreted by PET_RP_Slave.cpp
 BUTTON_COMMAND_WORD = {
     "Scan": "scan",
     "AcquireData": "acquireData",
@@ -133,6 +141,7 @@ BUTTON_COMMAND_WORD = {
 
 INVALID_FILENAME_CHARS = set(r' \/:*?"<>|')
 
+# function to test whether an entered value is really an integer
 def is_valid_int_partial(s: str) -> bool:
     if s == "" or s == "-":
         return True
@@ -142,6 +151,7 @@ def is_valid_int_partial(s: str) -> bool:
     except ValueError:
         return False
 
+# function to test whether an entered value is really floating-point
 def is_valid_float_partial(s: str) -> bool:
     if s in ("", "-", ".", "-."):
         return True
@@ -151,9 +161,11 @@ def is_valid_float_partial(s: str) -> bool:
     except ValueError:
         return False
 
+# function to test whether an entered string can be a valid filename (no bad characters)
 def is_valid_filename_partial(s: str) -> bool:
     return all(ch not in INVALID_FILENAME_CHARS for ch in s)
 
+# try to detect valid open COM ports, but the best bet is for the user to enter the correct port into the GUI
 def get_detected_ports():
     if list_ports is None:
         return []
@@ -216,6 +228,7 @@ class PETScannerGUI:
         # variables
         self.vars = {}
 
+        # Try to get smart about setting the default COM port. If this doesn't work, then the user will have to set the correct port
         # COM list: detected first; fallback COM1..COM7
         detected = get_detected_ports()
         fallback = [f"COM{i}" for i in range(1, 8)]
@@ -261,6 +274,7 @@ class PETScannerGUI:
         left_w = max(self.left_min_width, target)
         left_container.configure(width=left_w)
 
+    # Function to build the left-hand GUI panel where all the various parameters can be set.
     def _build_left_panel(self):
         # COM selector
         top = ttk.Frame(self.left_inner)
@@ -357,6 +371,7 @@ class PETScannerGUI:
         for c in range(4):
             self.left_inner.columnconfigure(c, weight=1)
 
+    # Function to build the panel where the graph of counts versus position is displayed.
     def _build_graph(self, right: ttk.Frame):
         graph_frame = ttk.Frame(right, padding=(10, 10))
         graph_frame.grid(row=0, column=0, sticky="nsew")
@@ -369,6 +384,7 @@ class PETScannerGUI:
         self.canvas = FigureCanvasTkAgg(fig, master=graph_frame)
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
 
+    # Function to build the row of command "action" buttons below the graph
     def _build_control_strip(self, right: ttk.Frame):
         strip = ttk.Frame(right, padding=(10, 8))
         strip.grid(row=1, column=0, sticky="ew")
@@ -392,7 +408,7 @@ class PETScannerGUI:
 
         ttk.Label(strip, textvariable=self.vars["plot_status"]).grid(row=2, column=0, columnspan=col, sticky="w", pady=(6, 0))
 
-    # validation
+    # functions to validate data entered by the user
     def _validate_int(self, proposed: str) -> bool:
         return is_valid_int_partial(proposed)
 
@@ -415,7 +431,7 @@ class PETScannerGUI:
         elif v < 0.0:
             self.vars["angle"].set("0")
 
-    # command building
+    # Function to build a command to be sent to PET_RP_Slave on the Red Pitaya
     def build_cmd_list(self, button_name: str):
         cmd_word = BUTTON_COMMAND_WORD.get(button_name, button_name)
         keys_needed = BUTTON_PARAM_SETS.get(button_name, [])
@@ -573,6 +589,7 @@ class PETScannerGUI:
         t = threading.Thread(target=self._serial_worker, args=(port, cmd_list), daemon=True)
         t.start()
 
+    # This routine starts each time communication with the PET_RP_Slave code on the Red Pitaya is needed
     def _serial_worker(self, port: str, cmd_list):
         ser = None
         try:
@@ -587,11 +604,13 @@ class PETScannerGUI:
             )
             time.sleep(1)
 
+            # Send a simple message to the Red Pitaya
             print(f"[Serial] Sending {SERIAL_CFG['handshake_send']!r}")
             ser.write(SERIAL_CFG["handshake_send"])
             reply = ser.readline()
             print(f"[Serial] Reply is {reply!r}")
 
+            # Check that the expected reply is returned by the Red Pitaya. If not, then PET_RP_Slave.cpp probably isn't executing.
             if reply != SERIAL_CFG["handshake_expect"]:
                 print("Handshake Protocol Failed; Closing Com Port")
                 return
@@ -628,7 +647,7 @@ class PETScannerGUI:
                 except Exception:
                     pass
 
-
+# Main program. All execution starts here
 def main():
     root = tk.Tk()
     try:
@@ -638,7 +657,10 @@ def main():
     except Exception:
         pass
 
+    # Create an instance of the PETScannerGUI class
     PETScannerGUI(root)
+    
+    # Make the GUI live, continually waiting for input and executing user requests
     root.mainloop()
 
 

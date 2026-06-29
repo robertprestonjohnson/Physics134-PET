@@ -38,7 +38,7 @@ int main(int argc, char* argv[]) {
     }
 
     const int size = 1024;    // Maximum number of characters in the UART buffer
-    PET myPET(size);         // Creates an instance of the PET class
+    PET myPET(size);          // Creates an instance of the PET class
     myPET.setVerbose(verbose);
 
     const int mxArg = 50;    // Maximum number of tokens in the command string
@@ -130,14 +130,7 @@ int main(int argc, char* argv[]) {
         if (someThing == "Send Histogram A" || someThing == "Send Histogram B") {
             int det = 1;
             if (someThing == "Send Histogram A") det = 0;
-            int nHistBins;
-            uint32_t* histoGram = myPET.getHistogram(det, &nHistBins);
-            memcpy(rx_buf, histoGram, nHistBins * sizeof(histoGram[0]));
-            rx_buf[nHistBins * sizeof(histoGram[0])] = '\n';
-            res = rp_UartWrite((unsigned char*)rx_buf, nHistBins * sizeof(histoGram[0]) + 1);
-            if (res != EXIT_SUCCESS) {
-                printf("PET_RP_Slave: error writing histogram to UART: %s\n", rp_HwGetError(res));
-            }
+            myPET.sendHistogram(det);
             continue;
         }
         if (someThing == "START") {    // Start receiving a command string
@@ -190,7 +183,7 @@ int main(int argc, char* argv[]) {
             // Here, finally, we submit the command to be parsed and executed
             int ret = myPET.parseCMD(Argc, Argv);   // Blocks further execution until the action is complete
             if (ret != EXIT_SUCCESS) {
-                printf("Error parsing or executing the command line in PET::parseCMD.\n");
+                printf("Error parsing or executing the command line in PET::parseCMD. Error code %d\n", ret);
             }
 
             // Notify the Python program that command execution is complete

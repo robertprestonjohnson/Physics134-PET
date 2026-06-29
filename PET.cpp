@@ -23,12 +23,24 @@ int PET::parseCMD(int argc, char* argv[]) {    // Parse the command options from
     // Now, execute the requestions action
     if (action == "setTiming") {
         int rc = setTiming(tim.timingA, tim.timingB);
-
         return rc;
     }
-    if (action == "setDAC") {
+    if (action == "setTHR") {
+        dac.DAC = 0;
+        if (dac.thrCh == "chA") dac.DAC = 1;
+        else if (dac.thrCh == "chB") dac.DAC = 2;
         bool writeEEPROM = (dac.writeEE == "yes");
-        int rc = dacLoad(dac.DAC, writeEEPROM, dac.voltage);
+        int rc = -1;
+        if (dac.DAC > 0) rc = dacLoad(dac.DAC, writeEEPROM, dac.voltage);
+        return rc;
+    }
+    if (action == "setHV") {
+        dac.DAC = -1;
+        if (dac.HVch == "chA") dac.DAC = 3;
+        else if (dac.HVch == "chB") dac.DAC = 4;
+        bool writeEEPROM = (dac.writeEE == "yes");
+        int rc = -1;
+        if (dac.DAC > 2 && dac.voltage <= 1000.0) rc = dacLoad(dac.DAC, writeEEPROM, dac.voltage / 0.4);
         return rc;
     }
     if (action == "moveStage") {
@@ -38,6 +50,11 @@ int PET::parseCMD(int argc, char* argv[]) {    // Parse the command options from
         delete stgd;
         return rc;
     }
+	if (action == "rotateStage") {
+		int rc = stepperRotate(stg.angle);
+		return rc;
+	}
+	
     bool newPeds = acq.calcNewPeds == "yes";
     char* trgt = new char[acq.trgtype.length() + 1];
     memcpy(trgt, acq.trgtype.c_str(), acq.trgtype.length() + 1);
@@ -47,15 +64,15 @@ int PET::parseCMD(int argc, char* argv[]) {    // Parse the command options from
     if (action == "acquireData") {
         int count;
         rc = acquireData(acq.fileName.c_str(), &count, trgt, trgc, acq.runTime, acq.num_triggers, newPeds, acq.maxWrite,
-                         acq.coincWin, acq.sigThr, acq.pedA, acq.pedB, acq.gamMean, acq.gamSig, acq.calibA, acq.calibB);
+                         acq.trglev, acq.trghyst, acq.coincWin, acq.sigThr, acq.pedA, acq.pedB, acq.gamMean, acq.gamSig, acq.calibA, acq.calibB);
         printf("Counts of coincident 511 keV gamma rays = %d.\n", count);
         delete[] trgt;
         delete[] trgc;
         return rc;
     }
     if (action == "scan") {
-        rc = linearScan(scn.angle, scn.fileName.c_str(), scn.X0, scn.stepSize, scn.nStep, scn.dwellTime,
-                        acq.trglev, acq.trghyst, acq.coincWin, acq.sigThr, acq.pedA, acq.pedB, acq.gamMean, acq.gamSig, acq.calibA, acq.calibB);
+        rc = linearScan(scn.angle, scn.fileName.c_str(), scn.X0, scn.stepSize, scn.angleStep, scn.nStep, scn.nAngles, scn.dwellTime,
+                        acq.coincWin, acq.sigThr, acq.pedA, acq.pedB, acq.gamMean, acq.gamSig, acq.calibA, acq.calibB);
         delete[] trgt;
         delete[] trgc;
         return rc;
@@ -83,5 +100,6 @@ int PET::histo(float pulseSize, int det) {
 #include "dacLoad.cpp"
 #include "acquireData.cpp"
 #include "stepperLeftRight.cpp"
+#include "stepperRotate.cpp"
 #include "setTiming.cpp"
 #include "linearScan.cpp"

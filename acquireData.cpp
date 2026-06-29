@@ -5,6 +5,10 @@
 #include <thread>
 #include <math.h>
 #include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 
 #include "PET.h"
 #include "rp.h"
@@ -22,7 +26,7 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 	// maxWrite: maximum number of digitized pulses to write to a file "pulse.csv"
 	// trglev: trigger level for the internal trigger, to capture a digitized signal
 	// triggerHyst: trigger hysteresis for the internal trigger
-	// coincidenceWindow: maximum difference in start points of the two channels to define a coincidence
+	// coincidenceWindow: maximum difference in start points of the two channels to define a coincidence in the case of external triggers
 	// sigThr: threshold in noise sigmas to define the start of a gamma-ray pulse
 	// pedA: pedestal value for channel A (not used if newPeds is true)
 	// pedB: pedestal value for channel B (not used if newPeds is true)
@@ -31,7 +35,23 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
     // calibA: energy calibration for Channel A
 	// calibB: energy calibration for Channel B
 
-	printf("The data acquisition will run for %d triggers or time %f.\n", numIteration, runTime);
+    // The following time manipulations could be done more easily with a new gcc compiler than what the Red Pitaya supports
+    auto now = std::chrono::system_clock::now();
+	std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+	std::tm* local_time = std::localtime(&now_c);
+	std::ostringstream ss;
+	if (runTime == 0.) {
+		printf("acquireData: the data acquisition will run for %d triggers.\n", numIteration);
+		ss << "STATUS: UTC " << std::put_time(local_time, "%Y-%m-%d %H:%M:%S") << ", starting data acquisition for " << numIteration << " triggers\n";
+        std::string msg = ss.str();
+		UARTmsg(msg.c_str());
+	} else {
+		numIteration = 1000000;
+		printf("acquireData: the data acquisition will run for %f seconds.\n", runTime);
+		ss << "STATUS: UTC " << std::put_time(local_time, "%Y-%m-%d %H:%M:%S") << ", starting data acquisition for " << runTime << " seconds\n";
+        std::string msg = ss.str();
+		UARTmsg(msg.c_str());
+	}
 	
 	if (strcmp(trgtyp,"external") == 0 || strcmp(trgtyp,"internal") == 0 || strcmp(trgtyp,"pedestal") == 0) {
 		printf("acquireData: the trigger type is set to %s \n", trgtyp);
@@ -74,7 +94,7 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
     /* Allocate memory for the digitzed data */
     uint32_t buff_size = 16384;
     float *buff[2]; 
-	if (verbose) printf("acquireData: allocate buffers\n");
+	if (verbose) printf("acquireData: allocate buffers for floating points of size %d bytes\n", sizeof(float));
 	buff[0] = (float *)malloc(buff_size * sizeof(float));
 	buff[1] = (float *)malloc(buff_size * sizeof(float));
 	memset(buff[0], 0, buff_size * sizeof(float));
@@ -83,6 +103,20 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 		printf("acquireData: buffers allocated and zeroed\n");
 		printf("acquireData: the coincidence window is set to %d time samples.\n", coincidenceWindow);
 		printf("acquireData: threshold to detect a signal is %f times the rms noise.\n", sigThr);
+	}
+
+	// Check the allocated memory for the histograms
+	if (acq.nBins > defaultNbins) {
+		if (verbose) printf("Resizing histogram arrays to %d integers.\n", acq.nBins);
+		delete[] histA;
+		delete[] histB;
+		if (acq.nBins > UARTbufSize / sizeof(int) - 1) {
+			acq.nBins = UARTbufSize / sizeof(int) - 1;
+			printf("PET: the number of histograms bins is reduced to %d, in order to fit in the UART buffer.\n", acq.nBins);
+		}
+		histA = new uint32_t[acq.nBins];
+		histB = new uint32_t[acq.nBins];
+		defaultNbins = acq.nBins;
 	}
 
 	/* Initialize the histogram bins */
@@ -136,26 +170,48 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 	uint32_t startSearch = (buff_size - 384) / 2;
 	if (verbose) printf("acquireData: searches for the signal will start at time sample %d\n", startSearch);
 
-	float nSigSignal = 2.0;     // plus or minus number of standard deviations to cut around the mean to define the 511 keV signal
+	float nSigSignal = 2.5;     // plus or minus number of standard deviations to cut around the mean to define the 511 keV signal
 	if (verbose) printf("acquireData: 511 keV gammas will be counted if their pulse integral falls between %f and %f\n", gamMean - nSigSignal * gamSig, gamMean + nSigSignal * gamSig);
 
 	/* Begin the loop over triggers */
+	int minPulseLength = 10;     // Minimum length for a pulse to be counted as real
+	float histFactor = 0.5;      // Ratio of the downward to upward thresholds
+	int numBefore = 8;           // Number of samples to include in integral prior to crossing the upward threshold
+	int numAfter = 25;           // Number of samples to include in integral after falling below the downward threshold
+	double period = 8.01;                  // Digitizer period in ns
+	double gain = (3.3/(16384/2))*1000.;   // lsb of 14-bit (signed) digitizer, in mV
+	double sigN[2] = {0.005, 0.006};       // Average noise levels, to be used for thresholding pulses
+	int nPadding = 25;                     // Number of measurements to include in scope trace before and after the pulse
+	double clip = 0.2;                     // Defines voltage range to be included in pedestal calculation
+	if (strcmp(trgtyp,"pedestal") == 0) clip = 0.1;
+	double calibration[2] = { calibA, calibB };
+	if (verbose) printf("acquireData: CalibA=%f, CalibB=%f.\n", calibA, calibB);
 	int ret;
 	int nPeds = 0;
 	double sumPeds[2] = { 0.,0. };
 	double sumRms[2] = { 0., 0. };
 	double maxPulse = 0.;
 	double sumPed[2] = {0.,0.};
+	double sumNoise[2] = {0.,0.};
 	double sumPed2[2] = {0.,0.};
 	int nPed[2] = {0,0};
 	*count = 0;
 	std::chrono::duration<double, std::milli> elapsed_time = std::chrono::milliseconds::zero();
 	auto start_iter = std::chrono::high_resolution_clock::now();
+	int numTracesSent = 0;
+    int secLast = 0;
+	int elapsedLast = 0;
     for (int iter=0; iter<numIteration; ++iter) {		
 		if (verbose) {
 			printf("************************\n");
 		    printf("****** Trigger iteration %d\n",iter);
 		    printf("************************\n");
+		}
+		if (runTime == 0. && iter%100 == 0 && iter != 0) {
+			if (UARTabort()) {
+				printf("acquireData: stopping acquisition at trigger iteration %d by user request.\n", iter);
+				break;
+			}
 		}
 		rp_AcqStart();
 		auto start = std::chrono::high_resolution_clock::now();
@@ -185,11 +241,25 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 		int trial = 0;
 		while(1){
 			rp_AcqGetTriggerState(&state);
-			if (trial%100 == 0) {
+			if (trial%10000 == 0 && trial != 0) {
 				auto end = std::chrono::high_resolution_clock::now();
 				std::chrono::duration<double, std::milli> elapsed_ms = end - start;
+				elapsed_time += elapsed_ms;
+				start = end;
+				if (iter == 0 && source != RP_TRIG_SRC_EXT_PE) {
+					if (elapsed_ms.count() >= 15000) {
+						printf("Aborting acquisition at first iteration because no internal trigger occurred within 15 seconds.\n");
+						goto end_loops;
+					}
+				}
 				if (runTime > 0.) {
-					if (elapsed_ms.count() >= runTime*1000.) {
+					int elapsedSec = elapsed_time.count()/1000;
+			        if (elapsedSec%10 == 0 && elapsedSec != secLast) {
+						UARTmsg("STATUS: " + to_string(iter) + " triggers received thus far in " 
+		                                                            + to_string(elapsedSec) + " s. Continuing...\n");
+						secLast = elapsedSec;
+					}
+					if (elapsed_time.count() >= runTime*1000.) {
 						printf("Ending acquisition at iteration %d because of specified time limit.\n", iter);
 						goto end_loops;
 					}
@@ -202,7 +272,7 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 		}
 		auto end = std::chrono::high_resolution_clock::now();
 		std::chrono::duration<double, std::milli> elapsed_ms = end - start;
-		if (verbose) printf("acquireData: trigger detected at trial %d, elapsed time= %f ms\n", trial, elapsed_ms.count());
+		if (verbose) printf("acquireData: trigger %d detected at trial %d, elapsed time= %f ms\n", iter, trial, elapsed_ms.count());
 		elapsed_time += elapsed_ms;
 
 		bool fillState = false;
@@ -213,7 +283,18 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 		}
 		if (verbose) printf("acquireData: fillState good at trial %d = %d\n",trial,fillState);
 
-		UARTmsg("STATUS: " + to_string(iter) + " triggers received thus far. Continuing...\n");
+        if (runTime > 0.) {
+			int elapsedSec = elapsed_time.count()/1000;
+			printf("%d seconds elapsed in acquisition\n", elapsedSec);
+			if (elapsedSec%10 == 0 && elapsedLast != elapsedSec) {
+				UARTmsg("STATUS: " + to_string(iter) + " triggers received thus far in " 
+		                                                            + to_string(elapsedSec) + " s. Continuing...\n");
+			    elapsedLast = elapsedSec;
+			}
+		} else {
+			if (iter%100 == 0 && iter != 0) UARTmsg("STATUS: " + to_string(iter) + " triggers received thus far in " 
+		                                                            + to_string(elapsed_time.count()/1000.) + " s. Continuing...\n");
+		}
 
 		// Fill the buffers with digitized data from the latest trigger
 		uint32_t dataSize = buff_size;
@@ -228,21 +309,18 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 		double noise[2] = {0.,0.};
 		double noise2[2] = {0.,0.};
 		double minSig[2] = {999.,999.};
-		double sigN[2] = {0.000931, 0.001268};
 		double pedestal[2] = { pedA, pedB }; 
 		double integral[2] = { 0., 0. };
+		double peak[2] = {0., 0.};
 		int nNoise[2] = {0,0};
 		bool found[2];
 		int nSamp[2];
 		double sampMean[2];
-		double period = 8.01;                  // Digitizer period in ns
-		double gain = (3.3/(16384/2))*1000.;   // lsb of 14-bit (signed) digitizer, in mV
 		int npulseFnd[2] = {0,0};
 		int t0[2] = { 0, 0 };
-		double clip = 0.5;
 		double pmax;
-		double calibration[2] = { calibA, calibB };
-		if (strcmp(trgtyp,"pedestal") == 0) clip = 0.1;
+		int scopeBegin = 0;
+		int scopeEnd = 0;
 		for (uint32_t i=0; i < buff_size; ++i){
 			if (buff[0][i] > maxPulse) maxPulse = buff[0][i];
 			if (buff[1][i] > maxPulse) maxPulse = buff[1][i];
@@ -251,7 +329,7 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 			if (i < startSearch || strcmp(trgtyp,"pedestal") == 0){
 				for (int j=0; j<2; ++j) {
 					if (buff[j][i] < minSig[j]) minSig[j] = buff[j][i];
-					if (buff[j][i] < clip && buff[j][i] > -clip){
+					if (buff[j][i] - pedestal[j] < clip && buff[j][i] - pedestal[j] > -clip){
 						nNoise[j]++;
 						noise[j] += buff[j][i];
 						noise2[j] += buff[j][i]*buff[j][i];
@@ -259,18 +337,21 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 				}
 			} else {       // Start searching for pulses just before the trigger point
 				if (i == startSearch) {
-					for (int j=0; j<2; ++j) {     // Loop over the two channels
+					for (int j=0; j<2; ++j) {     // Loop over the two channels to finalize pedestal and noise and to initialize
 						noise[j] = noise[j]/nNoise[j];
-						double pedes = noise[j];
-						sumPed[j] += pedes;
-						sumPed2[j] += pedes*pedes;
-						nPed[j]++;
+						double pedes = noise[j];  // This will be the auto pedestal
 						noise2[j] = noise2[j]/nNoise[j];
 						double sigmaN = sqrt(noise2[j] - noise[j]*noise[j]);
 						if (verbose) printf("acquireData: RMS noise level from channel %d = %f, pedestal = %f \n",j,sigmaN,pedes);
-						if (newPeds) {
+						sumPed[j] += pedes;      // To calculate the average pedestal
+						sumNoise[j] += sigmaN;   // To calculate the average noise
+						sumPed2[j] += pedes*pedes;
+						nPed[j]++;
+						if (newPeds) {   // For auto pedestals we update the pedestal every event
 							pedestal[j] = pedes;
 							sigN[j] = sigmaN;
+						} else {
+							if (verbose) printf("acquireData: on channel %d, using preset noise level %f and pedestal %f\n",j,sigN[j],pedestal[j]);
 						}
                         integral[j] = 0.0;
 						nSamp[j] = 0;
@@ -279,56 +360,75 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 				    pmax = 0.;
 				}
 				for (int j=0; j<2; ++j) {
-					if (!found[j] && buff[j][i] > pedestal[j]+sigThr*sigN[j]) {  // Detect the start of the pulse
-						found[j] = true;
-						if (verbose) if (verbose) printf("acquireData: found signal on channel %d at sample %d\n",j,i);
-						nSamp[j] = 1;
-						t0[j] = i;
-						sampMean[j] = buff[j][i];
-						integral[j] = buff[j][i] - pedestal[j];    
-						integral[j] += buff[j][i-1] - pedestal[j];
-						integral[j] += buff[j][i-2] - pedestal[j];
-						integral[j] += buff[j][i-3] - pedestal[j];
-					}
-				}
-				for (int j=0; j<2; ++j) {
-					if (found[j]) {       // Add up the signal above pedestal in the pulse
-						nSamp[j]++;
-						sampMean[j] += buff[j][i];
-						integral[j] += buff[j][i] - pedestal[j];
-						if (buff[j][i] > pmax) pmax = buff[j][i];
-					}
-					if (found[j] && buff[j][i] < pedestal[j]+3.0*sigN[j]) {   // Detect the end of the pulse
-						found[j] = false;
-						npulseFnd[j]++;
-						nSamp[j]--;
-						sampMean[j] -= buff[j][i];
-						if (i+3 < buff_size) {
-						    integral[j] += buff[j][i+1] - pedestal[j];
-							integral[j] += buff[j][i+2] - pedestal[j];
-							integral[j] += buff[j][i+3] - pedestal[j];
+					if (!found[j]) {
+						if (buff[j][i] > pedestal[j] + sigThr*sigN[j]) {  // Detect the start of the pulse
+							found[j] = true;
+							if (scopeBegin == 0 || i - nPadding < scopeBegin) scopeBegin = i - nPadding;
+							if (verbose) if (verbose) printf("acquireData: found signal %f on channel %d at sample %d\n",buff[j][i],j,i);
+							nSamp[j] = 1;
+							t0[j] = i;
+							sampMean[j] = buff[j][i] - pedestal[j];
+							integral[j] = buff[j][i] - pedestal[j];
+                            for (int k=0; k<numBefore; ++k) {
+								if (i-k > 0) {
+									integral[j] += buff[j][i-k-1] - pedestal[j];
+								}
+							}								
+							peak[j] = buff[j][i];
 						}
-						sampMean[j] = sampMean[j]/nSamp[j];
-						integral[j] *= period * gain * calibration[j];   // Converts to energy units
-						if (verbose) {
-						    printf("acquireData: signal on channel %d ended at sample %d, length = %d = %f ns\n",j,i,nSamp[j],period * nSamp[j]);
-						    printf("acquireData: mean of signal on channel %d was %f\n",j,sampMean[j]);
-						    printf("acquireData: maximum of signal on both channels was %f\n",pmax);
-						    printf("acquireData: integral of signal on channel %d was %f mV ns\n",j,integral[j]);
+					} else {
+						if (buff[j][i] < pedestal[j] + (histFactor * sigThr)*sigN[j]) {   // Detect the end of the pulse
+							if (i + nPadding > scopeEnd) scopeEnd = i + nPadding;
+							found[j] = false;						
+							if (nSamp[j] >= minPulseLength) npulseFnd[j]++;
+							sampMean[j] -= buff[j][i];
+							integral[j] += buff[j][i] - pedestal[j];
+							for (int k=0; k<numAfter; ++k) {
+								if (i+1+k < buff_size) {
+									integral[j] += buff[j][i+1+k] - pedestal[j];
+								}
+							}
+							sampMean[j] = sampMean[j]/nSamp[j];						
+							if (verbose) {
+								printf("acquireData: signal on channel %d ended at sample %d, length = %d = %f ns\n",j,i,nSamp[j],period * nSamp[j]);
+								printf("acquireData: mean of signal on channel %d was %f\n",j,sampMean[j]);
+								printf("acquireData: maximum of signal on both channels was %f\n",pmax);
+								printf("acquireData: integral of signal on channel %d was %f keV\n",j,integral[j] * period * gain * calibration[j]);
+							}
+						} else {  // Add up the integral of the pulse
+							nSamp[j]++;
+							sampMean[j] += buff[j][i] - pedestal[j];
+							integral[j] += buff[j][i] - pedestal[j];
+							if (buff[j][i] > pmax) pmax = buff[j][i];
+							if (buff[j][i] > peak[j]) peak[j] = buff[j][i];
 						}
 					}
 				}
 			}
 			// For the external trigger, exit the loop over digitizations early only if a pulse was found in both channels.
-			// For the internal trigger, exit the loop early as soon as a single pulse is found.
+			// For the internal trigger, exit the loop early as soon as a single pulse is found in the channel of interest
 			if (strcmp(trgtyp,"external") == 0) {
 				if (npulseFnd[0]>0 && npulseFnd[1]>0) break;
 			} else {
 				if (strcmp(trgtyp,"internal") == 0) {
-					if (npulseFnd[0]>0 || npulseFnd[1]>0) break;
+					if (strcmp(trgCh,"chA") == 0 && npulseFnd[0]>0) break;
+					if (strcmp(trgCh,"chB") == 0 && npulseFnd[1]>0) break;
 				} 
 			}
 		} 
+		// Send the two pulses to be plotted like oscilloscope traces in the GUI
+		if (scopeEnd > scopeBegin && numTracesSent < acq.maxScope) {
+			int nPoints = scopeEnd - scopeBegin + 1;
+			if ((nPoints * sizeof(buff[0][0]) > UARTbufSize)) nPoints = UARTbufSize / sizeof(buff[0][0]) - 1;
+			string msg = "PULSES: " + to_string(nPoints * sizeof(buff[0][0])) + "\n";
+			UARTmsg(msg.c_str());
+			sendPulse(0, nPoints, &buff[0][scopeBegin]);
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			sendPulse(1, nPoints, &buff[1][scopeBegin]);
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			numTracesSent++;
+		}
+		for (int j=0; j<2; ++j) integral[j] *= period * gain * calibration[j];   // Converts to energy units
 		// Write out the pulse integral results
 		if (strcmp(trgtyp,"external") == 0) {
 			if (abs(t0[0]-t0[1]) < coincidenceWindow) {
@@ -337,8 +437,13 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 					printf("acquireData: integrals = %f and %f keV\n", integral[0], integral[1]);
 				}
 				if (fp != NULL) fprintf(fp,"%f, %f\n",integral[0],integral[1]);
-				histo(integral[0], 0);
-				histo(integral[1], 1);
+				if (acq.histType == "integral") {
+					histo(integral[0], 0);
+					histo(integral[1], 1);
+			    } else {
+					histo(peak[0], 0);
+					histo(peak[1], 1);
+				}
 				int nCnt = 0;
 				for (int j = 0; j < 2; ++j) {
 					if (integral[j] > gamMean - nSigSignal * gamSig && integral[j] < gamMean + nSigSignal * gamSig) {
@@ -354,9 +459,14 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 					printf("acquireData: integrals = %f and %f keV\n", integral[0], integral[1]);
 				}
 				if (fp != NULL) fprintf(fp,"%f, %f\n",integral[0],integral[1]);
-				histo(integral[0], 0);
-				histo(integral[1], 1);
-			} else {
+				if (acq.histType == "integral") {
+					histo(integral[0], 0);
+					histo(integral[1], 1);
+			    } else {
+					histo(peak[0], 0);
+					histo(peak[1], 1);
+				}
+			} else {       // For pedestal run only (rare, since it requires a special trigger input)
 				nPeds = nPeds + 1;
 				for (int j=0; j<2; ++j) {
 					noise[j] = noise[j]/nNoise[j];
@@ -401,6 +511,19 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 	printf("Total time for the iterations was %f ms. The total live time was %f ms\n", elapsed_total.count(), elapsed_time.count());
     double liveTime = 100.0*(elapsed_time.count()/elapsed_total.count());
 	printf("The live time fraction was %f percent.\n", liveTime);
+    now = std::chrono::system_clock::now();
+	now_c = std::chrono::system_clock::to_time_t(now);
+	local_time = std::localtime(&now_c);
+	std::ostringstream ss2;
+	if (strcmp(trgtyp,"external") == 0) {
+		ss2 << "STATUS: UTC " << std::put_time(local_time, "%Y-%m-%d %H:%M:%S") << ", Acquisition completed after " << 
+					elapsed_total.count()/1000. << " s. Livetime fraction = " << liveTime << "%, # e+e- = " << *count << "\n";
+	} else {
+		ss2 << "STATUS: UTC " << std::put_time(local_time, "%Y-%m-%d %H:%M:%S") << ", Acquisition completed after " << 
+					elapsed_total.count()/1000. << " s. Livetime fraction = " << liveTime << "%\n";
+	}
+    std::string msg = ss2.str();
+	UARTmsg(msg.c_str());
 	if (strcmp(trgtyp,"pedestal") == 0) {
 		printf("acquireData: after %d trials, the average pedestal results are\n", nPeds);
 		for (int j=0; j<2; ++j) {
@@ -411,12 +534,19 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
 
     printf("acquireData: maximum pulse height encountered = %f\n",maxPulse);
 	if (nPed[0] > 0 && nPed[1] > 0) {
+		double sigma[2];
 		for (int j=0; j<2; ++j) {
 			sumPed[j] = sumPed[j]/nPed[j];
 			sumPed2[j] = sumPed2[j]/nPed[j];
-			double sigma = sqrt(sumPed2[j] - sumPed[j]*sumPed[j]);
-			printf("acquireData: the mean of %d pedestal measurements for channel %d is %f. The rms = %f.\n",nPed[j],j,sumPed[j],sigma);
+			sigma[j] = sqrt(sumPed2[j] - sumPed[j]*sumPed[j]);
+			printf("acquireData: the mean of %d pedestal measurements for channel %d is %f. The rms = %f.\n",nPed[j],j,sumPed[j],sigma[j]);
+			double avgNoise = sumNoise[j]/nPed[j];
+			printf("acquireData: the mean rms noise on channel %d is %f.\n",j,avgNoise);
 		}
+		string msg = "Measured pedestals: A=" + to_string(sumPed[0]) + " +- " + to_string(sigma[0])+ ";  B=" + to_string(sumPed[1]) + " +- " + to_string(sigma[1]) + "\n";
+		UARTmsg(msg.c_str());
+		msg = "Average noise: A=" + to_string(sumNoise[0]/nPed[0]) + "; B=" + to_string(sumNoise[1]/nPed[1]) + "\n";
+		UARTmsg(msg.c_str());
 	}
 	
 	/* Write the histograms to a file */

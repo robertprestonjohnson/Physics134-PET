@@ -29,7 +29,8 @@ int PET::stepperLeftRight (char const* direction, float distance) {
 	#define DLY 430 //pulse length in microseconds  (430 shows as 500 microseconds on the oscilloscope)
 
 	int numSteps = floor(distance / mmPerStep);
-	if (verbose) printf("stepperLeftRight: the stage translation will require %d steps.\n", numSteps);
+	float time = (float)numSteps / 1000.;
+	if (verbose) printf("stepperLeftRight: the stage translation will require %d steps in %f seconds.\n", numSteps, time);
 
 	// Defining the Red Pitaya digital pins
 	rp_dpin_t STEP_PIN = RP_DIO5_P;
@@ -51,6 +52,7 @@ int PET::stepperLeftRight (char const* direction, float distance) {
 		rp_DpinGetState(STOPPINL, &left);
 		if (verbose) printf("stepperLeftRight: stop pin states at beginning of travel: right=%d, left=%d\n", right, left);
 		if (left == RP_HIGH) {
+			double distCovered = numSteps * mmPerStep;
 			for (int i=0; i <= numSteps; i++) {				
 				rp_DpinSetState(STEP_PIN, RP_HIGH);    
 				usleep(DLY);                               // This code creates square pulses of about 1 ms period to drive the stepper
@@ -58,13 +60,15 @@ int PET::stepperLeftRight (char const* direction, float distance) {
 				usleep(DLY);
 				rp_DpinGetState(STOPPINL, &left);
 				if (left == RP_LOW) {
-					double distCovered = i * mmPerStep;
+					distCovered = i * mmPerStep;
 					if (verbose) printf("stepperLeftRight: motion is stopping after %d steps or %f mm due to hitting the end of travel.\n", i, distCovered);
+					UARTmsg("STATUS: stopping leftward motion after " + to_string(distCovered) + " mm due to hitting the end of travel.\n");
 					break;
 				}
 			}
 			rp_DpinGetState(STOPPINR, &right);
-			if (verbose) printf("stepperLeftRight: stop pin states at end of travel: right=%d, left=%d\n", right, left);
+			if (verbose) printf("stepperLeftRight: stop pin states at end of travel: right=%d, left=%d\n", right, left);			
+			UARTmsg("STATUS: stage successfully moved to the left by " + to_string(distCovered) + " mm.\n");
 		} else {
 			printf("stepperLeftRight: no motion is possible, as the stage is already at the leftmost limit of travel.\n");
 			return EXIT_FAILURE;
@@ -75,6 +79,7 @@ int PET::stepperLeftRight (char const* direction, float distance) {
 		rp_DpinGetState(STOPPINL, &left);
 		if (verbose) printf("stepperLeftRight: stop pin states at beginning of travel: right=%d, left=%d\n", right, left);
 		if (right == RP_HIGH) {
+			double distCovered = numSteps * mmPerStep;
 			for (int i = 0; i <= numSteps; i++) {
 				rp_DpinSetState(STEP_PIN, RP_HIGH);
 				usleep(DLY);
@@ -82,13 +87,15 @@ int PET::stepperLeftRight (char const* direction, float distance) {
 				usleep(DLY);
 				rp_DpinGetState(STOPPINR, &right);
 				if (right == RP_LOW) {
-					double distCovered = i * mmPerStep;
+					distCovered = i * mmPerStep;
 					if (verbose) printf("stepperLeftRight: motion is stopping after %d steps or %f mm due to hitting the end of travel.\n", i, distCovered);
+					UARTmsg("STATUS: stopping rightward motion after " + to_string(distCovered) + " mm due to hitting the end of travel.\n");
 					break;
 				}
 			}
 			rp_DpinGetState(STOPPINR, &left);
 			if (verbose) printf("stepperLeftRight: stop pin states at end of travel: right=%d, left=%d\n", right, left);
+			UARTmsg("STATUS: stage successfully moved to the right by " + to_string(distCovered) + " mm.\n");
 		} else {
 			printf("stepperLeftRight: no motion is possible, as the stage is already at the rightmost limit of travel.\n");
 			return EXIT_FAILURE;

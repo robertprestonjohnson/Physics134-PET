@@ -15,7 +15,7 @@
 
 int main(int argc, char* argv[]) {
     
-    PET myPET(255);    // Creates an instance of the PET class
+    PET myPET(1024);    // Creates an instance of the PET class
 
     // Parse the command line and execute the corresponding action
     int ret = myPET.parseCMD(argc, argv);
