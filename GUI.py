@@ -5,7 +5,9 @@ from tkinter import ttk
 import tkinter.font as tkfont
 import sys
 import ctypes
+import json
 from scipy.signal import find_peaks
+from datetime import datetime
 
 # Windows API constants
 ES_CONTINUOUS       = 0x80000000
@@ -42,7 +44,6 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_widths
 import math
 
-# UART parameters for the communication between PC and Red Pitaya. These must match what is set in PET_RP_Slave.cpp
 SERIAL_CFG = {
     "baudrate": 115200,
     "timeout": 20,
@@ -51,9 +52,7 @@ SERIAL_CFG = {
     "done_token": b"DONE\n",
 }
 
-# Default values for the parameters that can be set by the GUI. A few no longer appear in the GUI, for safety (e.g. "write").
 DEFAULTS = {
-    "angleRot": "15",
     "angle0": "0",
     "numAngles": "2",
     "angleStep": "20",
@@ -103,6 +102,9 @@ DEFAULTS = {
 
     "direction": "left",
     "distance": "5",
+    
+    "angleRot": "15",
+    "sense": "forward", 
 
     "datafile": "histData.csv",
     
@@ -111,9 +113,20 @@ DEFAULTS = {
     "bckgndFit": "yes",
 }
 
-# Define parameters that appear in the list on the left in the GUI and take numerical or string values
+response = input("PET GUI: do you want to input new defaults from a file?: ")
+if response == "yes":
+    response = input("Input a file path: ")
+    try:
+        with open(response, "r") as file:
+            DEFAULTS = json.load(file)
+            print("Defaults loaded from file ", response, ": ")
+            print(DEFAULTS)
+    except:
+        print("The file ", response, " was not found")
+        quit() 
+
 NUM_PARAMS = [
-    {"key": "angleRot",    "label": "Angle Rot",   "prefix": "-g", "dtype": "float"},
+    {"key": "angleRot",    "label": "Rot. Angle",   "prefix": "-g", "dtype": "float"},
     {"key": "angle0",      "label": "Angle0",      "prefix": "-G", "dtype": "float"},
     {"key": "numAngles",   "label": "Num Angles",  "prefix": "-L", "dtype": "int"},
     {"key": "angleStep",   "label": "Angle Step",  "prefix": "-s", "dtype": "float"},
@@ -153,15 +166,12 @@ NUM_PARAMS = [
     {"key": "datafile",    "label": "Datafile",    "prefix": "-f", "dtype": "str"},
 ]
 
-# This paramter is treated separately in the code from those above, although it isn't clear why. . .
-CTRL_FILE = {"key": "filename", "label": "File", "prefix": "-F", "dtype": "str"}
-
-# Define parameters that appear in the list on the left in the GUI and have drop-down menus
 DROPDOWNS = [
     {"key": "trgtype",   "label": "Trgtype",   "prefix": "-t", "options": ("external", "internal")},
     {"key": "trigchan",  "label": "TrigChan",  "prefix": "-c", "options": ("chA", "chB")},
     {"key": "write",     "label": "Write",     "prefix": "-w", "options": ("yes", "no")},
     {"key": "direction", "label": "Direction", "prefix": "-d", "options": ("left", "right")},
+    {"key": "sense",     "label": "Rot. Sense",     "prefix": "-o", "options": ("forward", "backward")},
     {"key": "dac", "label": "DAC", "prefix": "-D", "options": ("chA", "chB")},
     {"key": "HVdac", "label": "HVDAC", "prefix": "-C", "options": ("chA", "chB")},
     {"key": "histtype", "label": "histType",   "prefix": "-Q", "options": ("integral", "peak")},
@@ -169,7 +179,8 @@ DROPDOWNS = [
     {"key": "autoPed", "label": "AutoPed", "prefix": "-p", "options": ("yes", "no")},
 ]
 
-# Define the command parameters that each action button will send to the Red Pitaya main program PET_RP_Slave.cpp 
+CTRL_FILE = {"key": "filename", "label": "File", "prefix": "-F", "dtype": "str"}
+
 BUTTON_PARAM_SETS = {
     "Scan": [
         "filename",
@@ -181,7 +192,7 @@ BUTTON_PARAM_SETS = {
         "autoPed",
         "pedA", "pedB",
         "coincwindow", "pulsethresh",
-        "gamMax", "numBins", "histtype",
+        "gamMax", "numBins", "histtype", "maxscope",
     ],
     "Acquire Data": [
         "filename",
@@ -201,7 +212,7 @@ BUTTON_PARAM_SETS = {
         "direction", "distance",
     ],
     "Rotate Stage": [
-        "angleRot",
+        "angleRot", "sense",
     ],
     "Set Timing": [
         "timingA", "timingB",
@@ -215,9 +226,9 @@ BUTTON_PARAM_SETS = {
     "Graph": [],
     "Spectrum": [],
     "Abort": [],
+    "Temperature": [],
 }
 
-# Define for each action button the name of the corresponding command to be interpreted by PET_RP_Slave.cpp
 BUTTON_COMMAND_WORD = {
     "Scan": "scan",
     "Acquire Data": "acquireData",
@@ -229,11 +240,11 @@ BUTTON_COMMAND_WORD = {
     "Graph": "graph",
     "Spectrum": "Spectrum",
     "Abort": "abort",
+    "Temperature": "getTemp",
 }
 
 INVALID_FILENAME_CHARS = set(r' \/:*?"<>|')
 
-# function to test whether an entered value is really an integer
 def is_valid_int_partial(s: str) -> bool:
     if s == "" or s == "-":
         return True
@@ -243,7 +254,6 @@ def is_valid_int_partial(s: str) -> bool:
     except ValueError:
         return False
 
-# function to test whether an entered value is really floating-point
 def is_valid_float_partial(s: str) -> bool:
     if s in ("", "-", ".", "-."):
         return True
@@ -253,18 +263,16 @@ def is_valid_float_partial(s: str) -> bool:
     except ValueError:
         return False
 
-# function to test whether an entered string can be a valid filename (no bad characters)
 def is_valid_filename_partial(s: str) -> bool:
     return all(ch not in INVALID_FILENAME_CHARS for ch in s)
 
-# try to detect valid open COM ports, but the best bet is for the user to enter the correct port into the GUI
 def get_detected_ports():
     if list_ports is None:
         return []
     return [p.device for p in list_ports.comports()]
 
 
-class PETScannerGUI:
+class PETScannerGUI:  
     def __init__(self, root: tk.Tk):
         self.root = root
 
@@ -365,16 +373,13 @@ class PETScannerGUI:
 
         self.left_inner.bind("<Configure>", _on_inner_config)
 
-        # Define tkinter variables
         self.vars = {}
         self.widgets = {}
 
-        # Try to get smart about setting the default COM port. If this doesn't work, then the user will have to set the correct port
         detected = get_detected_ports()
         fallback = [f"COM{i}" for i in range(1, 8)]
         self.com_options = detected + [p for p in fallback if p not in detected]
 
-        # default COM selection: try COM5 if it exists, else first detected, else COM5
         default_com = "COM5" if "COM5" in self.com_options else (self.com_options[0] if self.com_options else "COM5")
         self.vars["com_port"] = tk.StringVar(value=default_com)
 
@@ -383,11 +388,9 @@ class PETScannerGUI:
         self.vars["abortStatus"] = tk.StringVar(value=DEFAULTS["abortStatus"])
         self.vars["bckgndFit"] = tk.StringVar(value=DEFAULTS["bckgndFit"])
 
-        # numeric and string left variables defined in the NUM_PARAMS list
         for p in NUM_PARAMS:
             self.vars[p["key"]] = tk.StringVar(value=DEFAULTS[p["key"]])
 
-        # dropdown variables
         for d in DROPDOWNS:
             self.vars[d["key"]] = tk.StringVar(value=DEFAULTS[d["key"]])
 
@@ -432,7 +435,6 @@ class PETScannerGUI:
         num_by_key = {p["key"]: p for p in NUM_PARAMS}
         dd_by_key = {d["key"]: d for d in DROPDOWNS}
 
-        # Function to create a box in which to enter data in the left panel
         def make_entry(parent, key: str):
             spec = num_by_key[key]
             dtype = spec["dtype"]
@@ -446,7 +448,6 @@ class PETScannerGUI:
                 return ttk.Entry(parent, textvariable=self.vars[key], width=14, validate="key", validatecommand=vcmd)
             return ttk.Entry(parent, textvariable=self.vars[key], width=14)
 
-        # Function to create a dropdown menu in the left panel
         def make_dropdown(parent, key: str):
             spec = dd_by_key[key]
             return ttk.Combobox(
@@ -456,8 +457,7 @@ class PETScannerGUI:
                 state="readonly",
                 width=12,
             )
-            
-        # Function to add a text heading above a set of GUI variables in the left panel
+
         def add_heading(r: int, text: str) -> int:
             ttk.Label(self.left_inner, text=text, font=self.sidebar_heading_font, style="TLabel").grid(
                 row=r, column=0, columnspan=4, sticky="w", pady=(8, 2)
@@ -467,7 +467,6 @@ class PETScannerGUI:
             )
             return r + 2
 
-        # Function to create a row of drop-down menues and/or data boxes in the left panel
         def add_row(r: int, left_label, left_key, right_label=None, right_key=None, right_is_filename=False, store_left=False, store_right=False):
             ttk.Label(self.left_inner, text=left_label, style="TLabel").grid(row=r, column=0, sticky="w", padx=(0, 12), pady=3)
             if left_key in dd_by_key:
@@ -510,7 +509,7 @@ class PETScannerGUI:
 
         r = add_heading(r, "Move or Rotate Stage")
         add_row(r, "Direction", "direction", "Distance", "distance"); r += 1
-        add_row(r, "Angle Rot", "angleRot"); r += 1
+        add_row(r, "Rot Sense", "sense", "Rot Angle", "angleRot"); r += 1
 
         r = add_heading(r, "Scan")
         add_row(r, "Angle 0", "angle0", "# Angles", "numAngles"); r += 1
@@ -537,7 +536,6 @@ class PETScannerGUI:
         for c in range(4):
             self.left_inner.columnconfigure(c, weight=1)
 
-    # Stuff to do if somebody changes variables affecting the histogram type
     def _on_histtype_change(self, *_):
         t = self.vars["histtype"].get()
         print("t = ", t)
@@ -548,7 +546,6 @@ class PETScannerGUI:
             self.vars["gamMax"].set("1500")
             self.vars["numBins"].set("150")            
 
-    # Stuff to do if somebody changes the trigger type
     def _on_trgtype_change(self, *_):
         t = self.vars["trgtype"].get()
         trigchan_w = self.widgets.get("trigchan")
@@ -570,7 +567,6 @@ class PETScannerGUI:
             if trghyst_w is not None:
                 trghyst_w.configure(state="disabled")
 
-    # Function to build the panel where the graph of counts versus position is displayed.
     def _build_graph(self, right: ttk.Frame, primary_bg: str):
         graph_frame = ttk.Frame(right, padding=(10, 10), style="Main.TFrame")
         graph_frame.grid(row=0, column=0, sticky="nsew")
@@ -594,12 +590,11 @@ class PETScannerGUI:
         self.canvas = FigureCanvasTkAgg(fig, master=graph_frame)
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
 
-    # Function to build the row of command "action" buttons below the graph
     def _build_control_strip(self, right: ttk.Frame, muted_text: str):
         strip = ttk.Frame(right, padding=(10, 8), style="Main.TFrame")
         strip.grid(row=1, column=0, sticky="ew")
 
-        buttons = ["Set Threshold", "Set HV", "Set Timing", "Move Stage", "Rotate Stage", "Acquire Data", "Scan", "Graph", "Spectrum", "Abort"]
+        buttons = ["Set Threshold", "Set HV", "Set Timing", "Move Stage", "Rotate Stage", "Acquire Data", "Scan", "Graph", "Spectrum", "Abort", "Temperature"]
         col = 0
         for name in buttons:
             ttk.Button(strip, text=name, command=lambda n=name: self.on_button(n)).grid(row=0, column=col, padx=4)
@@ -610,7 +605,6 @@ class PETScannerGUI:
         ttk.Label(strip, textvariable=self.vars["plot_status"], style="TLabel", foreground=muted_text).grid(row=2, column=0, columnspan=col, sticky="w", pady=(6, 0))
         ttk.Label(strip, textvariable=self.vars["status_msg"], style="TLabel").grid(row=2, column=0, columnspan=col, sticky="w", pady=(6, 0))
 
-    # functions to validate data entered by the user
     def _validate_int(self, proposed: str) -> bool:
         return is_valid_int_partial(proposed)
 
@@ -633,7 +627,6 @@ class PETScannerGUI:
         elif v < 0.0:
             self.vars["angle0"].set("0")
 
-    # Function to build a command to be sent to PET_RP_Slave on the Red Pitaya
     def build_cmd_list(self, button_name: str):
         cmd_word = BUTTON_COMMAND_WORD.get(button_name, button_name)
         keys_needed = BUTTON_PARAM_SETS.get(button_name, [])
@@ -685,11 +678,9 @@ class PETScannerGUI:
                 return "0"
         return raw if raw != "" else "0"
 
-    # Define a plot status message just below the plot
     def _set_plot_status(self, msg: str):
         self.root.after(0, lambda: self.vars["plot_status"].set(msg))
 
-    # Display status messages coming from the Red Pitaya
     def _set_status_msg(self, msg: str):
         self.root.after(0, lambda: self.vars["status_msg"].set(msg))
 
@@ -698,8 +689,7 @@ class PETScannerGUI:
             return float(v)
         except Exception:
             return None
-            
-    # Parse the scan results returned from the Red Pitaya, in order to build the plot
+
     def _parse_scan_results_text(self, text: str):
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         if not lines:
@@ -743,7 +733,6 @@ class PETScannerGUI:
 
         return angle_value, positions, counts
 
-    # Build the main plot displayed by the GUI: counts versus scan position
     def plot_scan_histogram_from_tempfile(self):
         path = self.vars["tempFile"].get().strip()
         if not path:
@@ -800,7 +789,6 @@ class PETScannerGUI:
         self.canvas.draw_idle()
         self._set_plot_status(f"Plotted: {os.path.basename(path)}")
 
-    # Define what to do when an action button is pushed
     def on_button(self, button_name: str):
         if button_name == "Graph":
             self.root.after(0, self.plot_scan_histogram_from_tempfile)
@@ -820,7 +808,6 @@ class PETScannerGUI:
         t = threading.Thread(target=self._serial_worker, args=(port, cmd_list), daemon=True)
         t.start()
 
-    # This routine starts each time communication with the PET_RP_Slave code on the Red Pitaya is needed
     def _serial_worker(self, port: str, cmd_list):
         ser = None
         window = None
@@ -837,13 +824,11 @@ class PETScannerGUI:
             )
             time.sleep(1)
 
-            # Send a simple handshake message to the Red Pitaya
             print(f"[Serial] Sending {SERIAL_CFG['handshake_send']!r}")
             ser.write(SERIAL_CFG["handshake_send"])
             reply = ser.readline()
             print(f"[Serial] Reply is {reply!r}")
 
-            # Check that the expected reply is returned by the Red Pitaya. If not, then PET_RP_Slave.cpp probably isn't executing.
             if reply != SERIAL_CFG["handshake_expect"]:
                 print("Handshake Protocol Failed; Closing Com Port")
                 return
@@ -869,6 +854,8 @@ class PETScannerGUI:
                 if s == SERIAL_CFG["done_token"]:
                     break
                 msgString = s.decode('utf-8');
+                with open("PET_LOG.txt", "a", encoding="utf-8") as file:
+                    file.write(msgString)
                 if "STATUS:" in msgString: 
                     self._set_status_msg(msgString)
                     if scanCMD and "ready to rotate to next angle" in msgString:
@@ -991,7 +978,6 @@ class PETScannerGUI:
                 except Exception:
                     pass
 
-    # Create a new window to display the spectral histograms
     def show_analysis_window(self):
         def sndcmd(cmdList):
             for cmd in cmdList:
@@ -1011,7 +997,7 @@ class PETScannerGUI:
             time.sleep(1)
             print(ser.name)
 
-            # Send a handshake message to see if the RP is alive. . .
+            # Send a message to see if the RP is alive. . .
             data_to_send = "R U THERE?"
             print("Sending ", data_to_send.encode('ascii'))
             ser.write(data_to_send.encode('ascii'))
@@ -1058,7 +1044,6 @@ class PETScannerGUI:
             return
         self.plot_histograms()
             
-    # Function to plot and fit the spectral histograms
     def plot_histograms(self):   
         def gaussian(x, amplitude, mean, sigma):
             return amplitude * np.exp(-((x - mean) ** 2) / (2 * sigma ** 2))
@@ -1191,7 +1176,6 @@ class PETScannerGUI:
         canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
         return win
 
-    # Function to display oscilloscope-like traces of the Red Pitaya digitizations
     def plot_oscilloscope(self, nPoints):   
         print("Plot the oscilloscope traces now for " + str(nPoints) + " points")
         
@@ -1262,12 +1246,14 @@ class PETScannerGUI:
         canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
         return win
 
-# Main program. All execution starts here
 def main():
-    print("PET scanner GUI version 1.1 starting.")
+    now = datetime.now()
+    print("PET scanner GUI version 2.2 starting on ",now)
+    with open("PET_LOG.txt", "w", encoding="utf-8") as file:
+        file.write(f"PET Scanner GUI starting on {now}.\n")
     root = tk.Tk()
-    PETScannerGUI(root)  # Create an instance of the PETScannerGUI class
-    root.mainloop()      # Make the GUI live, continually waiting for input and executing user requests
+    PETScannerGUI(root)
+    root.mainloop()
 
 
 if __name__ == "__main__":
