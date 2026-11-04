@@ -16,30 +16,16 @@
 
 int main(int argc, char* argv[]) {  
     // Arguments:
-    //     verbose     -- to turn on debug printing
     //     time        -- integer, to set the UART timeout in seconds
-    //                 -- if both arguments are given, verbose must come first
     
-    bool verbose = false;
     int timeOut = 100;
     if (argc > 1) {
-        if (strcmp(argv[1], "verbose") == 0) {
-            verbose = true;
-            printf("PET_RP_Slave: verbose mode turned on.\n");
-        }
-        else {
-            timeOut = atoi(argv[1]) * 10;
-            printf("PET_RP_Slave: UART timeout set to %d seconds\n", timeOut/10);
-        }
-        if (argc > 2 && verbose) {
-            timeOut = atoi(argv[2]) * 10;
-            printf("PET_RP_Slave: UART timeout set to %d seconds\n", timeOut/10);
-        }
+        timeOut = atoi(argv[1]) * 10;
+        printf("PET_RP_Slave: UART timeout set to %d seconds\n", timeOut/10);
     }
 
     const int size = 1024;    // Maximum number of characters in the UART buffer
     PET myPET(size);          // Creates an instance of the PET class
-    myPET.setVerbose(verbose);
 
     const int mxArg = 50;    // Maximum number of tokens in the command string
 
@@ -103,9 +89,13 @@ int main(int argc, char* argv[]) {
         // Read something from the UART, as sent by Python on the PC
         rdSize = size;    // rp_UartRead overwrites the buffer size argument, so it has to be reset before each call
         res = rp_UartRead((unsigned char*)rx_buf, &rdSize);  // the returned rdSize is the actual size of the string
-        if (verbose) printf("PET_RP_Slave: UART read (%s) %d  res=%d\n", rx_buf, rdSize, res);
+        #ifdef VERBOSE
+            printf("PET_RP_Slave: UART read (%s) %d  res=%d\n", rx_buf, rdSize, res);
+        #endif
         if (res != EXIT_SUCCESS) {
-            if (verbose) printf("PET_RP_Slave: error return from rp_UartRead = %d, %s\n", res, rp_HwGetError(res));
+            #ifdef VERBOSE
+                printf("PET_RP_Slave: error return from rp_UartRead = %d, %s\n", res, rp_HwGetError(res));
+            #endif
             continue;
         }
 
@@ -145,15 +135,21 @@ int main(int argc, char* argv[]) {
                 memset(rx_buf, '\0', size);   // Zero the buffer to avoid confusing debug printout
                 rdSize = size;
                 res = rp_UartRead((unsigned char*)rx_buf, &rdSize);
-                if (verbose) printf("PET_RP_Slave: UART read (%s) %d, res = %d\n", rx_buf, rdSize, res);
+                #ifdef VERBOSE
+                    printf("PET_RP_Slave: UART read (%s) %d, res = %d\n", rx_buf, rdSize, res);
+                #endif
                 if (res != EXIT_SUCCESS) {
                     printf("PET_RP_Slave: error %d reading UART: %s\n", res, rp_HwGetError(res));
                     continue;
                 }
                 string token(rx_buf, rdSize);  // This string constructor makes a **copy** of rdSize characters
-                if (verbose) printf("Token received for Argc=%d is %s\n", Argc, token.c_str());
+                #ifdef VERBOSE
+                    printf("Token received for Argc=%d is %s\n", Argc, token.c_str());
+                #endif
                 string ack = "Ack token '" + token + "'\n";
-                if (verbose) printf("ack=%s\n", ack.c_str());
+                #ifdef VERBOSE
+                    printf("ack=%s\n", ack.c_str());
+                #endif
                 char* buffer4 = new char[ack.length() + 1];
                 memcpy(buffer4, ack.c_str(), ack.length() + 1);    
                 res = rp_UartWrite((unsigned char*)buffer4, strlen(buffer4));
@@ -162,7 +158,9 @@ int main(int argc, char* argv[]) {
                 }
                 if (token == "END") break;
                 delete[] buffer4;
-                if (verbose) printf("For Argc=%d allocate new char for string %s, length %d\n", Argc, token.c_str(),token.length());
+                #ifdef VERBOSE
+                    printf("For Argc=%d allocate new char for string %s, length %d\n", Argc, token.c_str(),token.length());
+                #endif
                 Argv[Argc] = new char[token.length() + 1]; 
                 memcpy(Argv[Argc], token.c_str(), token.length() + 1);
                 if (Argc == mxArg - 1) {
@@ -174,40 +172,56 @@ int main(int argc, char* argv[]) {
             Argv[Argc] = new char[nl.length() + 1];  // Put a null character in the next Argv string per Linux std (even though probably not used here)
             memcpy(Argv[Argc], nl.c_str(), nl.length() + 1);
 
-            printf("PET_RP_Slave command submitted: ");   // Print out the full command on one line, including the null
+            snprintf(myPET.logmsg, sizeof(myPET.logmsg), "PET_RP_Slave command submitted: ");   // Print out the full command on one line, including the null
+            myPET.logger(myPET.logmsg);
             for (int i = 0; i <= Argc; ++i) {
-                printf("%s ", Argv[i]);
+                snprintf(myPET.logmsg, sizeof(myPET.logmsg), "%s ", Argv[i]);
+                myPET.logger(myPET.logmsg);
             }
-            printf("\n");
+            myPET.logger("\n");
 
             // Here, finally, we submit the command to be parsed and executed
             int ret = myPET.parseCMD(Argc, Argv);   // Blocks further execution until the action is complete
             if (ret != EXIT_SUCCESS) {
-                printf("Error parsing or executing the command line in PET::parseCMD. Error code %d\n", ret);
+                snprintf(myPET.logmsg, sizeof(myPET.logmsg), "Error parsing or executing the command line in PET::parseCMD. Error code %d\n", ret);
+                myPET.logger(myPET.logmsg);
+                if (ret == -75) {
+                    snprintf(myPET.logmsg, sizeof(myPET.logmsg), "PET_RP_Slave: terminating exicution due to over-temperature condition of the Red Pitaya CPU.\n");
+                    myPET.logger(myPET.logmsg);
+                    break;    // Stop execution if the Red Pitaya temperature is too high
+                }
             }
 
             // Notify the Python program that command execution is complete
             const char* buffer2 = "DONE\n";   
-            if (verbose) printf("PET_RP_Slave: command execution finished. Sending 'DONE'\n");
+            #ifdef VERBOSE
+                printf("PET_RP_Slave: command execution finished. Sending 'DONE'\n");
+            #endif
             res = rp_UartWrite((unsigned char*)buffer2, strlen(buffer2));
             if (res != EXIT_SUCCESS) {
                 printf("PET_RP_Slave: error writing '%s' to UART: %s\n", buffer2, rp_HwGetError(res));
             }
 
             // Free the memory used by the character strings, as the pointers will be used again for the next command
-            if (verbose) printf("PET_RP_Slave: freeing %d token strings Argv. . .\n", Argc);
+            #ifdef VERBOSE
+                printf("PET_RP_Slave: freeing %d token strings Argv. . .\n", Argc);
+            #endif
             for (int i = 1; i <= Argc; ++i) {
-				delete[] Argv[i];  // includes deleting Argv[Argc] = '\0'
-			}
+                delete[] Argv[i];  // includes deleting Argv[Argc] = '\0'
+            }
             continue;
         }
 
-        printf("PET_RP_Slave: unrecognized command '%s' received.\n", someThing.c_str());
+        snprintf(myPET.logmsg, sizeof(myPET.logmsg), "PET_RP_Slave: unrecognized command '%s' received.\n", someThing.c_str());
+        myPET.logger(myPET.logmsg);
     }
-	if (verbose) printf("PET_RP_Slave: deleting Argv[0] %s\n", Argv[0]); 
+    #ifdef VERBOSE
+        printf("PET_RP_Slave: deleting Argv[0] %s\n", Argv[0]); 
+    #endif
     delete[] Argv[0];
 
-    printf("PET_RP_Slave is closing.");
+    snprintf(myPET.logmsg, sizeof(myPET.logmsg), "PET_RP_Slave is closing.");
+    myPET.logger(myPET.logmsg);
     res = rp_UartRelease(); // close uart api
     if (res == EXIT_SUCCESS) myPET.setUartActive(false);
     

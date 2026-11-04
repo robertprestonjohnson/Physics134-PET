@@ -23,6 +23,7 @@ int PET::parseCMD(int argc, char* argv[]) {    // Parse the command options from
     // Now, execute the requestions action
     if (action == "setTiming") {
         int rc = setTiming(tim.timingA, tim.timingB);
+        fflush(flog);
         return rc;
     }
     if (action == "setTHR") {
@@ -32,6 +33,7 @@ int PET::parseCMD(int argc, char* argv[]) {    // Parse the command options from
         bool writeEEPROM = (dac.writeEE == "yes");
         int rc = -1;
         if (dac.DAC > 0) rc = dacLoad(dac.DAC, writeEEPROM, dac.voltage);
+        fflush(flog);
         return rc;
     }
     if (action == "setHV") {
@@ -41,6 +43,7 @@ int PET::parseCMD(int argc, char* argv[]) {    // Parse the command options from
         bool writeEEPROM = (dac.writeEE == "yes");
         int rc = -1;
         if (dac.DAC > 2 && dac.voltage <= 1000.0) rc = dacLoad(dac.DAC, writeEEPROM, dac.voltage / 0.4);
+        fflush(flog);
         return rc;
     }
     if (action == "moveStage") {
@@ -48,26 +51,41 @@ int PET::parseCMD(int argc, char* argv[]) {    // Parse the command options from
         strcpy(stgd, stg.direction.c_str());
         int rc = stepperLeftRight(stgd, stg.distance);
         delete stgd;
+        fflush(flog);
         return rc;
     }
-	if (action == "rotateStage") {
-		int rc = stepperRotate(stg.angle);
-		return rc;
-	}
-	
+    if (action == "rotateStage") {
+        char* stgs = new char(stg.sense.length() + 1);
+        strcpy(stgs, stg.sense.c_str());
+        int rc = stepperRotate(stg.angle, stgs);
+        delete stgs;
+        fflush(flog);
+        return rc;
+    }
+    if (action == "getTemp") {
+        string temp = getTemp();
+        string msg = "STATUS: The Red Pitaya CPU temperature is " + temp + " degrees C\n";
+        logger(msg.c_str());
+        UARTmsg(msg.c_str());
+        fflush(flog);
+        return 0;
+    }
+    
     bool newPeds = acq.calcNewPeds == "yes";
     char* trgt = new char[acq.trgtype.length() + 1];
     memcpy(trgt, acq.trgtype.c_str(), acq.trgtype.length() + 1);
     char* trgc = new char[acq.trgchan.length() + 1];
     memcpy(trgc, acq.trgchan.c_str(), acq.trgchan.length() + 1);
-	int rc = 0;	
+    int rc = 0; 
     if (action == "acquireData") {
         int count;
         rc = acquireData(acq.fileName.c_str(), &count, trgt, trgc, acq.runTime, acq.num_triggers, newPeds, acq.maxWrite,
                          acq.trglev, acq.trghyst, acq.coincWin, acq.sigThr, acq.pedA, acq.pedB, acq.gamMean, acq.gamSig, acq.calibA, acq.calibB);
-        printf("Counts of coincident 511 keV gamma rays = %d.\n", count);
+        snprintf(logmsg, sizeof(logmsg), "Counts of coincident 511 keV gamma rays = %d.\n", count);
+        logger(logmsg);
         delete[] trgt;
         delete[] trgc;
+        fflush(flog);
         return rc;
     }
     if (action == "scan") {
@@ -75,17 +93,21 @@ int PET::parseCMD(int argc, char* argv[]) {    // Parse the command options from
                         acq.coincWin, acq.sigThr, acq.pedA, acq.pedB, acq.gamMean, acq.gamSig, acq.calibA, acq.calibB);
         delete[] trgt;
         delete[] trgc;
+        fflush(flog);
         return rc;
     }
 
-    printf(" PET_RP: action %s is not understood.\n", action.c_str());
+    snprintf(logmsg, sizeof(logmsg), " PET_RP: action %s is not understood.\n", action.c_str());
+    logger(logmsg);
+    fflush(flog);
     return EXIT_FAILURE;
 }
 
 // A simple function for accumulating histograms of the pulse heights
 int PET::histo(float pulseSize, int det) {
     if (det != 0 && det != 1) {
-        printf("PET::histo: bad detector selection %d\n", det);
+        snprintf(logmsg, sizeof(logmsg), "PET::histo: bad detector selection %d\n", det);
+        logger(logmsg);
         return EXIT_FAILURE;
     }
     int bin = floor((pulseSize / acq.gamMax) * (float)acq.nBins);

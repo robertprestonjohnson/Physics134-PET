@@ -1,0 +1,60 @@
+{
+    "angle0": "0",
+    "numAngles": "2",
+    "angleStep": "20",
+
+    "nsteps": "2",
+    "x0": "30",
+    "stepsize": "5",
+    "dwelltime": "10",
+
+    "filename": "analysisData.csv",
+    "tempFile": "tempData.csv",
+
+    "number": "100",
+    "time": "0",
+    "trgtype": "internal",
+    "trigchan": "chA",
+
+    "trglev": "0.2",
+    "trghyst": "0",
+    "coincwindow": "1",
+    "pulsethresh": "10",
+
+    "mean": "511",
+    "sigma": "25.0",
+    "calibA": "15.6",
+    "calibB": "14.8",
+
+    "gamMax": "1500",
+    "numBins": "150",
+    "histtype": "integral",
+
+    "timingA": "48",
+    "timingB": "48",
+    
+    "pedA": "0.03894",
+    "pedB": "0.04228",
+    "autoPed": "no",
+
+    "maxscope": "0",
+
+    "dac": "chA",
+    "mvolts": "80",
+    "write": "no",
+    
+    "HVdac": "chA",
+    "volts": "740",
+
+    "direction": "left",
+    "distance": "5",
+    
+    "angleRot": "15",
+    "sense": "forward", 
+
+    "datafile": "histData.csv",
+    
+    "abortStatus": "NO",
+    
+    "bckgndFit": "yes"
+}

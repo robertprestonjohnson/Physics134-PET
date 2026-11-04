@@ -29,7 +29,8 @@
 
 int PET::setTiming(int ichanA, int ichanB) {
     if (ichanA < 1 || ichanB < 1 || ichanA > 255 || ichanB > 255) {
-        printf("setTiming: values %d and/or %d are not allowed. Must be 1 through 255\n",ichanA,ichanB);
+        snprintf(logmsg, sizeof(logmsg), "setTiming: values %d and/or %d are not allowed. Must be 1 through 255\n",ichanA,ichanB);
+		logger(logmsg);
         return EXIT_FAILURE;
     }
     char chanA = ichanA;
@@ -43,19 +44,29 @@ int PET::setTiming(int ichanA, int ichanB) {
     for (int i=7; i>=0; --i) {
         setting[i] = (chanA & mask)>>(7-i);
         mask = mask<<1;
-        //printf("%d  %d   %x   %x\n",i,setting[i],mask,chanA);
+		#ifdef VERBOSE
+            printf("%d  %d   %x   %x\n",i,setting[i],mask,chanA);
+		#endif
     }
     mask = 1;
     for (int i=7; i>=0; --i) {
         setting[i+8] = (chanB & mask)>>(7-i);
         mask = mask<<1;
     }
-    printf("setTiming: set channel A to %d = ",chanA);
-    for (int i=0; i<8; ++i) printf("%d",setting[i]);
-    printf("\n");
-    printf("setTiming: set channel B to %d =  ",chanB);
-    for (int i=8; i<16; ++i) printf("%d",setting[i]);
-    printf("\n");
+    snprintf(logmsg, sizeof(logmsg), "setTiming: set channel A to %d = ",chanA);
+	logger(logmsg);
+    for (int i=0; i<8; ++i) {
+		snprintf(logmsg, sizeof(logmsg), "%d",setting[i]);
+		logger(logmsg);
+	}
+    logger("\n");
+    snprintf(logmsg, sizeof(logmsg), "setTiming: set channel B to %d =  ",chanB);
+	logger(logmsg);
+    for (int i=8; i<16; ++i) {
+		snprintf(logmsg, sizeof(logmsg), "%d",setting[i]);
+		logger(logmsg);
+	}
+    logger("\n");
     UARTmsg("STATUS: setting channel A and B timing to " + to_string(chanA) + " and " + to_string(chanB) + "\n");
     
     rp_pinState_t state;
@@ -111,16 +122,20 @@ int PET::setTiming(int ichanA, int ichanB) {
             usleep(period/2);
         }
 
-        printf("setTiming: returned register values, iteration %d:  ",k);
+        snprintf(logmsg, sizeof(logmsg), "setTiming: returned register values, iteration %d:  ",k);
+		logger(logmsg);
         for (int i=0; i<16; ++i) {
-            printf("%d", settingQ[i]);
-            if (i == 7) printf("  ");
+            snprintf(logmsg, sizeof(logmsg), "%d", settingQ[i]);
+			logger(logmsg);
+            if (i == 7) logger("  ");
             if (settingQ[i] != setting[i]) good = false;
         }
-        printf("\n");
+        logger("\n");
     }
     if (!good) {
-        printf("setTiming: register setting returned does not match values loaded\n");
+        snprintf(logmsg, sizeof(logmsg), "setTiming: register setting returned does not match values loaded\n");
+		logger(logmsg);
+		UARTmsg("STATUS: failed to properly write the timing registers.\n");
     }
     else {
         UARTmsg("STATUS: timing registers read back exactly what was written.\n");

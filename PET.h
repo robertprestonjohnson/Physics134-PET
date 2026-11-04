@@ -1,28 +1,47 @@
 #ifndef PET_HH
 #define PET_HH 1
+//
+// Top level class for the Physics 134 PET experiment at UCSC. This C++ code runs
+// on the Red Pitaya. It executes as a command-line driven code under the main
+// program in PET_RP.cpp or as constantly running code in PET_RP_Slave that receives 
+// commands from the PET Python GUI via a UART connection to the PC.
+//
+// V 2.0: modified to work with the new Generation-2 Red Pitaya.
+//
 #include "arg.h"
 #include "rp.h"
 #include "rp_hw.h"
 
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <stdio.h>
 #include <string>
 #include <cmath>
+#include <cstdlib>
+#include <cerrno>
+#include <cstring>
+
+//#define VERBOSE   // define this macro to get lots of debug printout
 
 using namespace std;
 
 class PET
 {
 private:
-	const double Version = 1.2;   // Version of this code, 5/12/2026
+	const double Version = 2.1;   // Version of this code, 10/12/2026
 	string version;
     arg::Parser* parser;          // Pointer to an instance of the arg command line parser
 
     std::string action;           // The action specified by the command line
+	
+	float maxTemp = 70.0;         // Maximum allowed CPU temperature to continue execution of a scan
 
     int defaultNbins = 100;
     int UARTbufSize;
     char *uart_buf;
+	
+	FILE *flog;
 
     // Command parameters
     struct scan_parms {
@@ -77,27 +96,55 @@ private:
         string direction;
         float distance;
 		float angle;
+		string sense;
     } stg;
 
     bool uartIsActive = false;
-    bool verbose = true;
 
     uint32_t* histA;
     uint32_t* histB;
 
 public:
+	char logmsg[256];
+	
+    string getTemp() {
+		int rc = system("/opt/redpitaya/bin/monitor -ams | /bin/grep \"Temp\" > /tmp/temperature.txt");
+		if (rc != 0) printf("getTemp: Error from monitor + grep commands = %d\n", rc);
+		ifstream infile("/tmp/temperature.txt");
+		string temp = "-99.";
+		if (infile.is_open()) {
+			string line;
+			getline(infile, line);
+			istringstream iss(line);
+			while (iss >> temp) {
+				#ifdef VERBOSE
+				    cout << temp << endl;
+				#endif
+			}
+			#ifdef VERBOSE
+			    cout << "getTemp: the temperature is " << temp << " degrees C" << endl;
+			#endif
+		} else {
+			cerr << "Failed to open /tmp/temperature.txt! Reason: " << strerror(errno) << endl;
+		}
+		return temp;
+	}
     bool isUartActive() const {
         return uartIsActive;
     }
     void setUartActive(bool F) {
         uartIsActive = F;
     }
-    void setVerbose(bool F) {
-        verbose = F;
-    }
+	void logger(const char* s) {
+		printf("%s", s);
+		if (flog != NULL) fprintf(flog, "%s", s); else printf("logger: null file pointer\n");
+	}
+
     uint32_t* getHistogram(int det, int* nBins) {
         *nBins = acq.nBins;
-        if (verbose) printf("Getting histogram for detector %d with %d bins.\n", det, acq.nBins);
+        #ifdef VERBOSE
+            printf("Getting histogram for detector %d with %d bins.\n", det, acq.nBins);
+        #endif
         if (det == 0) return histA;
         else if (det == 1) return histB;
         else return NULL;
@@ -106,14 +153,18 @@ public:
 		if (uartIsActive) {
 			int nHistBins;
 			uint32_t* histoGram = getHistogram(det, &nHistBins);
-			if (verbose) printf("Number of bytes per histogram bin = %d.\n", sizeof(histoGram[0]));
+            #ifdef VERBOSE
+			    printf("Number of bytes per histogram bin = %d.\n", sizeof(histoGram[0]));
+            #endif
 			memcpy(uart_buf, histoGram, nHistBins * sizeof(histoGram[0]));
 			uart_buf[nHistBins * sizeof(histoGram[0])] = '\n';  // This \n is pointless, as readline won't work, since \n=\x0A
 			int res = rp_UartWrite((unsigned char*)uart_buf, nHistBins * sizeof(histoGram[0]) + 1);
 			if (res != EXIT_SUCCESS) {
 				printf("sendHistogram: error writing histogram to UART: %s\n", rp_HwGetError(res));
 			}
-			if (verbose) printf("sendHistogram: sent histogram for detector %d with %d bytes.\n", det, nHistBins * sizeof(histoGram[0]) + 1);    
+			#ifdef VERBOSE
+			    printf("sendHistogram: sent histogram for detector %d with %d bytes.\n", det, nHistBins * sizeof(histoGram[0]) + 1); 
+            #endif				
 		}
 	}
     void sendPulse(int det, int nPoints, float* buff) {
@@ -123,7 +174,9 @@ public:
             if (res != EXIT_SUCCESS) {
                 printf("sendPulse: error writing pulse to UART: %s\n", rp_HwGetError(res));
             }
-            if (verbose) printf("sendPulse: sent pulse for detector %d with %d bytes.\n", det, nPoints * sizeof(buff[0]));
+			#ifdef VERBOSE
+                printf("sendPulse: sent pulse for detector %d with %d bytes.\n", det, nPoints * sizeof(buff[0]));
+		    #endif
         }
     }
     /* The PET class constructor */
@@ -139,7 +192,7 @@ public:
         parser->set_header(" \n ******** PET Red Pitaya code version " + version + " **********");
         parser->add_help("");
         parser->add_help(" There is one positional argument: action");
-        parser->add_help(" action = 'setTHR' 'setHV' 'setTiming' 'moveStage' 'rotateStage' 'acquireData' 'scan' ");
+        parser->add_help(" action = 'setTHR' 'setHV' 'setTiming' 'moveStage' 'rotateStage' 'acquireData' 'scan' 'getTemp' ");
         parser->add_help("   The command line option syntax can take either a short or long form, e.g.:");
         parser->add_help("          -n 3000000");
         parser->add_help("               or equivalently");
@@ -173,7 +226,7 @@ public:
             .help("set the live time at each step of a linear scan, in seconds", "FLOAT")
             .show_default();
 
-        scn.fileName = "scanData.csv";
+        scn.fileName = "/tmp/scanData.csv";
         parser->add_opt('F', "fileName").stow(scn.fileName)
             .help("file name for results of a linear scan", "STRING")
             .show_default();
@@ -208,7 +261,7 @@ public:
 		    .help("histogram type: 'integral' vs 'peak'", "STRING")
 			.show_default();
 
-        acq.fileName = "coincidences.csv";
+        acq.fileName = "/tmp/coincidences.csv";
         parser->add_opt('f', "dataFile").stow(acq.fileName)
             .help("file name for pulse integrals from channels A and B; 'NULL' for none.", "STRING")
             .show_default();
@@ -333,14 +386,28 @@ public:
 		parser->add_opt('g', "angleRot").stow(stg.angle)
 		    .help("angle of stage rotation", "FLOAT")
 			.show_default();
+			
+		stg.sense = "forward";
+		parser->add_opt('o', "sense").stow(stg.sense)
+			.help("sense of stage rotation: 'forward' or 'backward'", "STRING")
+			.show_default();
 
         parser->add_opt_help();
         parser->add_opt_version(version);
 
+        #ifdef VERBOSE
+            printf("PET_RP is running with debug printout enabled.\n");
+		#endif
+
+        // Open a file to log normal printout
+		flog = fopen("/tmp/PET_log.txt", "w");
+		if (flog == NULL) printf("PET constructor failed to open the log file\n");
+
         // Allocate memory for the histograms
         if (acq.nBins > UARTbufSize / sizeof(int) - 1) {
             acq.nBins = UARTbufSize / sizeof(int) - 1;
-            printf("PET: the number of histograms bins is reduced to %d, in order to fit in the UART buffer.\n", acq.nBins);
+            snprintf(logmsg, sizeof(logmsg), "PET: the number of histograms bins is reduced to %d, in order to fit in the UART buffer.\n", acq.nBins);
+			logger(logmsg);
         }
         histA = new uint32_t[acq.nBins];
         histB = new uint32_t[acq.nBins];
@@ -362,6 +429,7 @@ public:
         delete parser;
         delete[] histA;
         delete[] histB;
+		fclose(flog);
         rp_Release();
 	}
 
@@ -374,7 +442,7 @@ public:
     int acquireData(char const* dataFile, int* count, char const* trgtyp, char const* trgCh, float runTime, int numIteration, bool newPeds, int maxWrite, float trglev, 
 	                float triggerHyst, int coincidenceWindow, float sigThr, float pedA, float pedB, float gamMean, float gamSig, float calibA, float calibB);
     int stepperLeftRight(char const* direction, float distance);
-	int stepperRotate (float angle);
+	int stepperRotate (float angle, char const* sense);
 
 private:
     int histo(float pulseSize, int det);
@@ -397,7 +465,9 @@ private:
 			int rdSize = UARTbufSize;
 			res = rp_UartRead((unsigned char*)uart_buf, &rdSize);  
 			if (res != EXIT_SUCCESS) {
-				if (verbose) printf("UARTabort: error return from rp_UartRead = %d, %s\n", res, rp_HwGetError(res));
+				#ifdef VERBOSE
+				    printf("UARTabort: error return from rp_UartRead = %d, %s\n", res, rp_HwGetError(res));
+				#endif
 				return false;
 			}
 			string reply(uart_buf, rdSize);
