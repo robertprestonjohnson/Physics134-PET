@@ -1,4 +1,6 @@
-// Red Pitaya API for rotating the stage a given angle
+// Red Pitaya PET API for rotating the stage by a given angle in the specified direction
+//
+// Author: Robert P. Johnson, January 2026
 //
 
 #include <stdio.h>

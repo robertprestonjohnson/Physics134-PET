@@ -4,6 +4,8 @@
 // than the falling threshold.
 // The high voltage values, in Volts, equal the mV DAC settings times 0.40, so a DAC setting of 2500 will deliver the maximum high
 // voltage of 1000 Volts.
+//
+// Author: Robert P. Johnson,  January 2026
 // 
 
 #include "PET.h"

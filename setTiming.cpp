@@ -1,4 +1,7 @@
-// Load the registers on the DS1023 timing chips to set the PET coincidence width
+// Load the registers on the PET coincidence board DS1023 timing chips to set the PET coincidence width
+//
+// Author: Robert P. Johnson,  January 2026
+//
 
 #include <stdio.h>
 #include <stdlib.h>

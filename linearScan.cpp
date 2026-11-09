@@ -1,5 +1,6 @@
 /* PET Red Pitaya routine to execute a stepped scan at each angle
 *  in a set of equally spaced angles.
+*
 *  Author: Robert P. Johnson    January 16, 2026
 */
 
@@ -39,7 +40,7 @@ int PET::linearScan(float angle0, char const* fn, float x0, float dx, float dThe
         return EXIT_FAILURE;
     }
 
-    float stageMax = 230.0;  // The distance between stops is 230.3 mm
+    float stageMax = stageTravelMax - 0.3;  // The distance between stops is 230.3 mm
     float endPosition = x0 + (nStep-1) * dx;
     if (endPosition > stageMax) {
         snprintf(logmsg, sizeof(logmsg), "linearScan: the stage motion will be out of range: %f > %f.\n", endPosition, stageMax);
@@ -83,9 +84,12 @@ int PET::linearScan(float angle0, char const* fn, float x0, float dx, float dThe
     strftime(cbuff, sizeof(cbuff), "%c", local_time); //    
     fprintf(fp, "PET scan results from %s\n", cbuff);
     string sdayTime(cbuff);
+	snprintf(logmsg, sizeof(logmsg), "linearScan: a new scan is beginning on %s.\n", sdayTime.c_str());
+    logger(logmsg);
 
     // The SCANDATA messages send temp-file lines to the GUI for plotting counts versus distance for each linear scan
     // The ANALYSIS messages send lines to be written on the PC disk for the final analysis data to be input into image reconstruction
+	UARTmsg("STATUS: PET scan is beginning on " + sdayTime + "\n");
     UARTmsg("ANALYSIS: PET scan results from " + sdayTime + "\n");
     string header = "Day Time Year, Angle, ";
     for (int step=0; step<nStep; ++step) {

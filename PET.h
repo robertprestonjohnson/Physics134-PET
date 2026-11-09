@@ -6,7 +6,10 @@
 // program in PET_RP.cpp or as constantly running code in PET_RP_Slave that receives 
 // commands from the PET Python GUI via a UART connection to the PC.
 //
+// Author: Robert P. Johnson,  January 2026
+//
 // V 2.0: modified to work with the new Generation-2 Red Pitaya.
+// V 2.2: abort scan if the stage gets a stop signal when not expected. Also, check the stop signal twice, to help avoid noise
 //
 #include "arg.h"
 #include "rp.h"
@@ -29,7 +32,7 @@ using namespace std;
 class PET
 {
 private:
-	const double Version = 2.1;   // Version of this code, 10/12/2026
+	const double Version = 2.2;   // Version of this code, 11/9/2026
 	string version;
     arg::Parser* parser;          // Pointer to an instance of the arg command line parser
 
@@ -38,6 +41,7 @@ private:
 	float maxTemp = 70.0;         // Maximum allowed CPU temperature to continue execution of a scan
 
     int defaultNbins = 100;
+	float stageTravelMax = 230.3; // Maximum stage travel distance
     int UARTbufSize;
     char *uart_buf;
 	
@@ -400,7 +404,7 @@ public:
 		#endif
 
         // Open a file to log normal printout
-		flog = fopen("/tmp/PET_log.txt", "w");
+		flog = fopen("/tmp/RP_PET_log.txt", "w");
 		if (flog == NULL) printf("PET constructor failed to open the log file\n");
 
         // Allocate memory for the histograms

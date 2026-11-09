@@ -1,3 +1,7 @@
+// Execute commands sent to the PET scanner
+//
+// Author: Robert P. Johnson,  January 2026
+//
 #include "PET.h"
 
 int PET::parseCMD(int argc, char* argv[]) {    // Parse the command options from GUI or from command line    

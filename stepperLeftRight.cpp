@@ -1,4 +1,7 @@
-// Red Pitaya API for moving the linear stage left or right a specified distance
+// Red Pitaya PET API for moving the linear stage left or right a specified distance
+// Set a large value >> 230.3 mm to drive the stage all the way to its end
+//
+// Author: Robert P. Johnson   January, 2026
 //
 
 #include <stdio.h>
@@ -10,9 +13,17 @@
 #include "rp.h"
 
 int PET::stepperLeftRight (char const* direction, float distance) {
+	bool hitEnd = false;
     if (strcmp(direction,"left") == 0 || strcmp(direction,"right") == 0) {
-        snprintf(logmsg, sizeof(logmsg), "stepperLeftRight: moving stage %f mm to the %s\n",distance,direction);
-        logger(logmsg);
+		if (distance > stageTravelMax) {
+			distance = stageTravelMax + 0.1;
+			snprintf(logmsg, sizeof(logmsg), "stepperLeftRight: moving stage to the %s until it hits the stop\n",direction);
+			logger(logmsg);
+			hitEnd = true;
+		} else {
+			snprintf(logmsg, sizeof(logmsg), "stepperLeftRight: moving stage %f mm to the %s\n",distance,direction);
+			logger(logmsg);
+		}
     } else {
         snprintf(logmsg, sizeof(logmsg), "stepperLeftRight: bad stage direction %s\n",direction);
         logger(logmsg);
@@ -72,6 +83,10 @@ int PET::stepperLeftRight (char const* direction, float distance) {
                         snprintf(logmsg, sizeof(logmsg), "stepperLeftRight: motion is stopping after %d steps or %.2f mm due to hitting the end of travel.\n", i, distCovered);
                         logger(logmsg);
                         UARTmsg("STATUS: stopping leftward motion after " + to_string(distCovered) + " mm due to hitting the end of travel.\n");
+						if (!hitEnd) {
+							UARTmsg("STATUS: stage was moved to the left by only " + to_string(distCovered) + " mm.\n");
+							return EXIT_FAILURE;  // a faulty stop signal may have registered
+						}
                         break;
                     }
                 }
@@ -108,6 +123,10 @@ int PET::stepperLeftRight (char const* direction, float distance) {
                         snprintf(logmsg, sizeof(logmsg), "stepperLeftRight: motion is stopping after %d steps or %.2f mm due to hitting the end of travel.\n", i, distCovered);
                         logger(logmsg);
                         UARTmsg("STATUS: stopping rightward motion after " + to_string(distCovered) + " mm due to hitting the end of travel.\n");
+						if (!hitEnd) {
+							UARTmsg("STATUS: stage was moved to the right by only " + to_string(distCovered) + " mm.\n");
+							return EXIT_FAILURE;  // a faulty stop signal may have registered
+						}
                         break;
                     }
                 }

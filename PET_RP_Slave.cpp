@@ -3,6 +3,7 @@
 // This is the UCSC PET-experiment C code that runs on the Red Pitaya.
 // This 'main' function runs continuously in the Red Pitaya and receives commands from the PC GUI via UART.
 // It also sends some data back to the PC via UART and larger data files back via Ethernet file-transfer-protocol.
+// This code should start executing automatically in the background whenever the Red Pitaya is started or rebooted.
 // 
 // Robert P. Johnson
 // January 2026
