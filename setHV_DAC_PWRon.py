@@ -30,11 +30,11 @@ try:
     # Send a typical command to be executed, bracketed by 'START' and 'END'
 
     print("Turn on the HV for Channel A")
-    cmdList = ['START', 'setHV', '-v', '20', '-D', '3', '-w', 'yes', 'END']
+    cmdList = ['START', 'setHV', '-v', '20', '-C', 'chA', '-w', 'yes', 'END']
     sndcmd(cmdList)
 
     print("Turn on the HV for Channel B")
-    cmdList = ['START', 'setHV', '-v', '20', '-D', '4', '-w', 'yes', 'END']
+    cmdList = ['START', 'setHV', '-v', '20', '-C', 'chB', '-w', 'yes', 'END']
     sndcmd(cmdList)
     
     # Send a command that will cause the RP program to exit its infinite loop and terminate execution
