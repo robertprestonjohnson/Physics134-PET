@@ -909,6 +909,7 @@ class PETScannerGUI:
                         print("Spectral histogram window created")
                 if "PULSES:" in msgString:
                     Npulses = int(self.vars["maxscope"].get().strip())
+                    if scanCMD: Npulses = 0
                     if Npulses == 1 and windowPulse is not None and windowPulse.winfo_exists():
                         windowPulse.destroy()
                     got_pulses = True

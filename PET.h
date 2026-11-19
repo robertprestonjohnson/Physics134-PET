@@ -307,7 +307,7 @@ public:
 
         acq.sigThr = 10.0;
         parser->add_opt('r', "pulseThresh").stow(acq.sigThr)
-            .help("set the threshold to detect a signal as a multiple of the rms noise.")
+            .help("set the threshold to detect a signal as a multiple of the rms noise.", "FLOAT")
             .show_default();
 
         acq.pedA = 0.038738;
