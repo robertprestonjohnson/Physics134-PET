@@ -10,6 +10,7 @@
 //
 // V 2.0: modified to work with the new Generation-2 Red Pitaya.
 // V 2.2: abort scan if the stage gets a stop signal when not expected. Also, check the stop signal twice, to help avoid noise
+// V 2.3: modified such that oscilloscope traces will never be plotted during a PET scan
 //
 #include "arg.h"
 #include "rp.h"
@@ -32,7 +33,7 @@ using namespace std;
 class PET
 {
 private:
-	const double Version = 2.2;   // Version of this code, 11/9/2026
+	const double Version = 2.3;   // Version of this code, 11/20/2026
 	string version;
     arg::Parser* parser;          // Pointer to an instance of the arg command line parser
 
@@ -444,7 +445,7 @@ public:
     int setTiming(int chanA, int chanB);
     int dacLoad(int DAC, bool writeEEPROM, int volt);
     int acquireData(char const* dataFile, int* count, char const* trgtyp, char const* trgCh, float runTime, int numIteration, bool newPeds, int maxWrite, float trglev, 
-	                float triggerHyst, int coincidenceWindow, float sigThr, float pedA, float pedB, float gamMean, float gamSig, float calibA, float calibB);
+	                float triggerHyst, int coincidenceWindow, float sigThr, float pedA, float pedB, float gamMean, float gamSig, float calibA, float calibB, int maxScope);
     int stepperLeftRight(char const* direction, float distance);
 	int stepperRotate (float angle, char const* sense);
 

@@ -139,7 +139,7 @@ int PET::linearScan(float angle0, char const* fn, float x0, float dx, float dThe
             int count; 
             UARTmsg("STATUS: starting acquisition at step " + to_string(step) + " Position " + to_string(position) + "mm.\n");
             int rc = acquireData("NULL", &count, "external", "chA", timePerStep, 1000000, false, 0, 1., 0., coincidenceWindow, sigThr, 
-                                 pedA, pedB, gamMean, gamSig, calibA, calibB);
+                                 pedA, pedB, gamMean, gamSig, calibA, calibB, 0);
             if (rc != EXIT_SUCCESS) {
                 snprintf(logmsg, sizeof(logmsg), "linearScan: failure in acquireData at step %d\n", step);
                 logger(logmsg);

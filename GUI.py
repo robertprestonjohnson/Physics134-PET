@@ -192,7 +192,7 @@ BUTTON_PARAM_SETS = {
         "autoPed",
         "pedA", "pedB",
         "coincwindow", "pulsethresh",
-        "gamMax", "numBins", "histtype", "maxscope",
+        "gamMax", "numBins", "histtype",
     ],
     "Acquire Data": [
         "filename",
@@ -368,6 +368,7 @@ class PETScannerGUI:
         inner_id = canvas.create_window((0, 0), window=self.left_inner, anchor="nw")
 
         def _on_inner_config(_evt):
+            self.left_inner.update_idletasks()
             canvas.configure(scrollregion=canvas.bbox("all"))
             canvas.itemconfig(inner_id, width=canvas.winfo_width())
 

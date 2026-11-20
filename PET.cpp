@@ -84,7 +84,7 @@ int PET::parseCMD(int argc, char* argv[]) {    // Parse the command options from
     if (action == "acquireData") {
         int count;
         rc = acquireData(acq.fileName.c_str(), &count, trgt, trgc, acq.runTime, acq.num_triggers, newPeds, acq.maxWrite,
-                         acq.trglev, acq.trghyst, acq.coincWin, acq.sigThr, acq.pedA, acq.pedB, acq.gamMean, acq.gamSig, acq.calibA, acq.calibB);
+                         acq.trglev, acq.trghyst, acq.coincWin, acq.sigThr, acq.pedA, acq.pedB, acq.gamMean, acq.gamSig, acq.calibA, acq.calibB, acq.maxScope);
         snprintf(logmsg, sizeof(logmsg), "Counts of coincident 511 keV gamma rays = %d.\n", count);
         logger(logmsg);
         delete[] trgt;

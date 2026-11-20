@@ -19,7 +19,7 @@
 #include "rp_hw.h"
 
 int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char const* trgCh, float runTime, int numIteration, bool newPeds, int maxWrite, float trglev, 
-    float triggerHyst, int coincidenceWindow, float sigThr, float pedA, float pedB, float gamMean, float gamSig, float calibA, float calibB) {
+    float triggerHyst, int coincidenceWindow, float sigThr, float pedA, float pedB, float gamMean, float gamSig, float calibA, float calibB, int maxScope) {
     // dataFile:  file name for the list of pulse integrals that will be calculated from the digitizations and output
     // count: number of 511 keV gamma-ray coincidences detected in the data
     // trgtyp: trigger type = "external", "internal", "pedestal"     (for the "pedestal" case a special external trigger must be provided)
@@ -38,6 +38,7 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
     // gamSig: 1-sigma width of the 511 keV gamma-ray signal, for counting purposes, units keV
     // calibA: energy calibration for Channel A
     // calibB: energy calibration for Channel B
+	// maxScope: maximum number of oscilloscope-like traces to display
 
     // The following time manipulations could be done more easily with a new gcc compiler than what the Red Pitaya supports
     auto now = std::chrono::system_clock::now();
@@ -472,7 +473,7 @@ int PET::acquireData(char const* dataFile, int* count, char const* trgtyp, char 
             }
         } 
         // Send the two pulses to be plotted like oscilloscope traces in the GUI
-        if (scopeEnd > scopeBegin && numTracesSent < acq.maxScope) {
+        if (scopeEnd > scopeBegin && numTracesSent < maxScope) {
             int nPoints = scopeEnd - scopeBegin + 1;
             if ((nPoints * sizeof(buff[0][0]) > UARTbufSize)) nPoints = UARTbufSize / sizeof(buff[0][0]) - 1;
             string msg = "PULSES: " + to_string(nPoints * sizeof(buff[0][0])) + "\n";
